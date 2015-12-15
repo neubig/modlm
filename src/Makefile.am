@@ -1,0 +1,1 @@
+SUBDIRS = modlm test

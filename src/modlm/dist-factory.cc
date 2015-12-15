@@ -1,0 +1,28 @@
+#include <modlm/dist-factory.h>
+#include <modlm/dist-ngram.h>
+#include <modlm/dist-uniform.h>
+#include <modlm/sentence.h>
+#include <fstream>
+
+using namespace std;
+using namespace modlm;
+
+DistPtr DistFactory::create_dist(const std::string & sig) {
+  if(sig.substr(0, 5) == "ngram") {
+    return DistPtr(new DistNgram(sig));
+  } else if(sig == "uniform") {
+    return DistPtr(new DistUniform(sig));
+  } else {
+    THROW_ERROR("Bad distribution signature");
+  }
+}
+
+DistPtr DistFactory::from_file(const std::string & file_name, DictPtr dict) {
+  ifstream in(file_name);
+  if(!in) THROW_ERROR("Could not open " << file_name);
+  string line;
+  if(!getline(in, line)) THROW_ERROR("Premature end of file");
+  DistPtr ret = DistFactory::create_dist(line);
+  ret->read(dict, in);
+  return ret;
+}
