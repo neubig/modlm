@@ -92,8 +92,9 @@ Sentence DistNgram::calc_ctxt(const Sentence & in, int pos, const Sentence & ctx
 
 // And calculate these features
 void DistNgram::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float* feats_out) const {
-  // Sentence this_ctxt = calc_ctxt(ctxt, ctxt.size()-1, ctxt_);
-  Sentence this_ctxt = ctxt;
+  Sentence this_ctxt;
+  for(size_t i : ctxt_)
+    this_ctxt.push_back(ctxt[i-1]);
   for(size_t j = counts_.size()-1; ; j--) {
     (*counts_[j]).calc_ctxt_feats(this_ctxt, held_out_wid, feats_out + 3 * j);
     if(this_ctxt.size() == 0) break;
@@ -114,8 +115,9 @@ void DistNgram::calc_word_dists(const Sentence & ctxt,
                                 float uniform_prob,
                                 bool leave_one_out,
                                 float* prob_out) const {
-  // Sentence this_ctxt = calc_ctxt(ctxt, ctxt.size()-1, ctxt_);
-  Sentence this_ctxt = ctxt;
+  Sentence this_ctxt;
+  for(size_t i : ctxt_)
+    this_ctxt.push_back(ctxt[i-1]);
   for(size_t j = counts_.size()-1; ; j--) {
     (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, leave_one_out, prob_out + wids.size() * j);
     if(this_ctxt.size() == 0) break;
