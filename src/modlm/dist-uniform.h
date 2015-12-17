@@ -38,14 +38,14 @@ public:
   // And calculate these features given ctxt, for words wids. uniform_prob
   // is the probability assigned in unknown ctxts. leave_one_out indicates
   // whether we should subtract one from the counts for cross-validation.
-  // prob_out is the output.
+  // prob_out is the output, which should be incremented after writing.
   virtual void calc_word_dists(const Sentence & ctxt,
                                const Sentence & wids,
                                float uniform_prob,
                                bool leave_one_out,
-                               float* prob_out) const override {
-    for(size_t i = 0; i < wids.size(); i++)
-      *(prob_out++) = uniform_prob;
+                               std::vector<float*> & probs_out) const override {
+    for(size_t i = 0; i < wids.size(); i++) 
+      *(probs_out[i]++) = uniform_prob;
   }
 
   // Read/write model. If dict is null, use numerical ids, otherwise strings.

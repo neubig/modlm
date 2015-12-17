@@ -34,26 +34,56 @@ inline std::string print_vec(const std::vector<T> vec) {
 
 Expression ModlmTrain::create_graph(const TrainingInstance & inst, cnn::Model & mod, cnn::ComputationGraph & cg) {
 
-  // Add the data for this instance
-  Expression h = input(cg, {(unsigned int)inst.ctxts.size()}, inst.ctxts);
-  Expression probs = input(cg, {(unsigned int)inst.wids.size(), (unsigned int)num_dist_}, inst.wdists);
-  Expression counts = input(cg, {(unsigned int)inst.wids.size()}, inst.wcnts);
+  // Dynamically create the target vectors
+  vector<float> wdists(inst.second.size() * num_dist_), wcnts(inst.second.size());
+  size_t pos = 0;
+  for(auto & kv : inst.second) {
+    memcpy(&wdists[pos * num_dist_], &kv.first[0], sizeof(float)*num_dist_);
+    wcnts[pos] = kv.second;
+    pos++;
+  }
+  // Load the targets
+  Expression probs = input(cg, {(unsigned int)num_dist_, (unsigned int)inst.second.size()}, wdists);
+  Expression counts = input(cg, {(unsigned int)inst.second.size()}, wcnts);
 
-  // cerr << "wids: " << print_vec(inst.wids) << endl;
-  // cerr << "wcnts: " << print_vec(inst.wcnts) << endl;
-  // cerr << "wdists: " << print_vec(inst.wdists) << endl;
-  // cerr << "ctxts: " << print_vec(inst.ctxts) << endl;
+  // cerr << "wcnts: " << print_vec(wcnts) << endl;
+  // cerr << "wdists: " << print_vec(wdists) << endl;
+
+  // If not using context, it's really simple
+  if(!use_context_) {
+    Expression nlprob = -log(transpose(probs) * softmax( parameter(cg, a_) ) );
+    Expression nll = transpose(counts) * nlprob;
+    return nll;
+  }
+
+  // Add the context for this instance
+  Expression h = input(cg, {(unsigned int)inst.first.first.size()}, inst.first.first);
 
   // Do the NN computation
+  if(word_hist_ != 0) {
+    vector<Expression> expr_cat(word_hist_+1);
+    expr_cat[0] = h;
+    for(size_t i = 0; i < inst.first.second.size(); i++)
+      expr_cat[i+1] = lookup(cg, reps_, inst.first.second[i]);
+    h = concatenate(expr_cat);
+  }
   for(size_t i = 0; i < Ws_.size(); i++)
     h = tanh( parameter(cg, Ws_[i]) * h + parameter(cg, bs_[i]) );
   Expression interp = softmax( parameter(cg, V_) * h + parameter(cg, a_) );
-  Expression nlprob = -log(probs * interp);
+  Expression nlprob = -log(transpose(probs) * interp);
   Expression nll = transpose(counts) * nlprob;
   return nll;
 }
 
-pair<int,vector<TrainingInstancePtr> > ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, const DictPtr dict, const std::string & file_name) {
+inline void calc_all_contexts(const vector<DistPtr> & dists, const Sentence & sent, int hold_out, TrainingContext & ctxt) {
+   int curr_ctxt = 0;
+   for(auto dist : dists) {
+     dist->calc_ctxt_feats(sent, -1, &ctxt.first[curr_ctxt]);
+     curr_ctxt += dist->get_ctxt_size();
+   }
+}
+
+int ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const std::string & file_name, TrainingData & data) {
 
   float uniform_prob = 1.0/dict->size();
   pair<int,CountsPtr> ret(0, CountsPtr(new Counts));
@@ -74,29 +104,40 @@ pair<int,vector<TrainingInstancePtr> > ModlmTrain::create_instances(const vector
   }
 
   // Create training data (num words, ctxt features, each model, true counts)
-  vector<TrainingInstancePtr> instances;
   int total_words = 0;
+  // Create and allocate the targets:
+  TrainingContext ctxt;
+  ctxt.first.resize(num_ctxt_);
+  ctxt.second.resize(word_hist_);
+  // Loop through each of the contexts
   for(auto & cnts : ret.second->get_cnts()) {
-    TrainingInstancePtr inst(new TrainingInstance(num_dist_, num_ctxt_, cnts.second->second.size()));
-    int i = 0;
+    // Calculate the words and contexts (if not holding out)
+    for(int i = 0; i < word_hist_; i++)
+      ctxt.second[i] = cnts.first[i];
+    if(!hold_out)
+      calc_all_contexts(dists, cnts.first, -1, ctxt);
+    // Prepare the pointers for each word
+    Sentence wids, wcnts;
+    std::vector<float*> ptrs(cnts.second->second.size());
+    std::vector<TrainingTarget> trgs(cnts.second->second.size(), TrainingTarget(num_dist_));
     for(auto & kv : cnts.second->second) {
-      inst->wids[i] = kv.first;
-      inst->wcnts[i] = kv.second;
+      ptrs[wids.size()] = &trgs[wids.size()][0];
+      wids.push_back(kv.first);
+      wcnts.push_back(kv.second);
       total_words += kv.second;
-      i++;
     }
-    int curr_dist = 0, curr_ctxt = 0;
-    for(auto dist : dists) {
-      dist->calc_ctxt_feats(cnts.first, -1, &inst->ctxts[curr_ctxt]);
-      dist->calc_word_dists(cnts.first, inst->wids, uniform_prob, false, &inst->wdists[curr_dist]);
-      curr_dist += dist->get_dist_size() * inst->wids.size();
-      curr_ctxt += dist->get_ctxt_size();
+    // Calculate all of the distributions
+    for(auto dist : dists)
+      dist->calc_word_dists(cnts.first, wids, uniform_prob, hold_out, ptrs);
+    // Add counts for each context
+    for(int i : boost::irange(0, (int)wids.size())) {
+      if(hold_out)
+        calc_all_contexts(dists, cnts.first, wids[i], ctxt);
+      data[ctxt][trgs[i]] += wcnts[i];
     }
-
-    instances.push_back(inst);
   } 
 
-  return std::make_pair(total_words, instances);
+  return total_words;
 }
 
 int ModlmTrain::main(int argc, char** argv) {
@@ -107,6 +148,10 @@ int ModlmTrain::main(int argc, char** argv) {
       ("test_file", po::value<string>()->default_value(""), "Test file")
       ("vocab_file", po::value<string>()->default_value(""), "Vocab file")
       ("dist_models", po::value<string>()->default_value(""), "Files containing the distribution models")
+      ("word_hist", po::value<int>()->default_value(0), "Word history length")
+      ("word_rep", po::value<int>()->default_value(50), "Word representation size")
+      ("hold_out", po::value<bool>()->default_value(false), "Whether to perform holding one out")
+      ("use_context", po::value<bool>()->default_value(true), "If set to false, learn context-independent coefficients")
       // ("model_out", po::value<string>()->default_value(""), "File to write the model to")
       // ("model_in", po::value<string>()->default_value(""), "If resuming training, read the model in")
       ("epochs", po::value<int>()->default_value(300), "Number of epochs")
@@ -161,11 +206,15 @@ int ModlmTrain::main(int argc, char** argv) {
     dict->SetUnk("<unk>");
   }
 
+  // Get word history and word representation size
+  word_hist_ = vm_["word_hist"].as<int>();
+  word_rep_ = vm_["word_rep"].as<int>();
+
   // Read in the models
   vector<string> strs;
   boost::split(strs, vm_["dist_models"].as<string>(), boost::is_any_of(" "));
   vector<DistPtr> dists;
-  size_t max_ctxt = 0;
+  size_t max_ctxt = word_hist_;
   for(auto str : strs) {
     dists.push_back(DistFactory::from_file(str, dict));
     max_ctxt = max((*dists.rbegin())->get_ctxt_len(), max_ctxt);
@@ -180,9 +229,14 @@ int ModlmTrain::main(int argc, char** argv) {
     num_ctxt_ += dist->get_ctxt_size();
   }
 
+  // Use context
+  use_context_ = vm_["use_context"].as<bool>();
+
   // Read in the data
-  pair<int,vector<TrainingInstancePtr> > train_inst = create_instances(dists, max_ctxt, dict, train_file_);
-  pair<int,vector<TrainingInstancePtr> > test_inst = create_instances(dists, max_ctxt, dict, test_files_[0]);
+  TrainingData train_inst, test_inst;
+  int train_words = create_instances(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_file_, train_inst);
+  int test_words  = create_instances(dists, max_ctxt, false, dict, test_files_[0], test_inst);
+  dists.clear();
 
   // Initialize
   cnn::Model mod;
@@ -194,22 +248,27 @@ int ModlmTrain::main(int argc, char** argv) {
     if(str != "")
       hidden_size.push_back(stoi(str));
 
-  int last_size = num_ctxt_;
-  for(auto size : hidden_size) {
-    Ws_.push_back(mod.add_parameters({(unsigned int)size, (unsigned int)last_size}));
-    bs_.push_back(mod.add_parameters({(unsigned int)size}));
-    last_size = size;
+  if(use_context_) {
+    int last_size = num_ctxt_ + word_rep_ * word_hist_;
+    // Add the word representation and transformation functions
+    if(word_hist_ != 0)
+      reps_ = mod.add_lookup_parameters(dict->size(), {(unsigned int)word_rep_});
+    // Add the functions
+    for(auto size : hidden_size) {
+      Ws_.push_back(mod.add_parameters({(unsigned int)size, (unsigned int)last_size}));
+      bs_.push_back(mod.add_parameters({(unsigned int)size}));
+      last_size = size;
+    }
+    V_ = mod.add_parameters({(unsigned int)num_dist_, (unsigned int)last_size});
   }
-  V_ = mod.add_parameters({(unsigned int)num_dist_, (unsigned int)last_size});
   a_ = mod.add_parameters({(unsigned int)num_dist_});
 
   // Train a neural network to predict the interpolation coefficients
-  for(int epoch = 1; epoch < 300; epoch++) {
-    random_shuffle(train_inst.second.begin(), train_inst.second.end());
+  for(int epoch = 1; epoch <= epochs_; epoch++) {
     float train_loss = 0.0, test_loss = 0.0;
-    for(auto inst : train_inst.second) {
+    for(auto inst : train_inst) {
       cnn::ComputationGraph cg;
-      create_graph(*inst, mod, cg);
+      create_graph(inst, mod, cg);
       train_loss += cnn::as_scalar(cg.forward());
       cg.backward();
       if(epoch <= 2)
@@ -218,16 +277,16 @@ int ModlmTrain::main(int argc, char** argv) {
     if(epoch > 2)
       trainer->update();
     trainer->update_epoch();
-    float train_ppl = exp(train_loss/train_inst.first);
+    float train_ppl = exp(train_loss/train_words);
     cout << "trn loss epoch " << epoch << ": " << train_ppl << endl;
     // Test PPL
     if(epoch % 10 == 0) {
-      for(auto inst : test_inst.second) {
+      for(auto inst : test_inst) {
         cnn::ComputationGraph cg;
-        create_graph(*inst, mod, cg);
+        create_graph(inst, mod, cg);
         test_loss += cnn::as_scalar(cg.forward());
       }
-      float test_ppl = exp(test_loss/test_inst.first);
+      float test_ppl = exp(test_loss/test_words);
       cout << "--- tst loss epoch " << epoch << ": " << test_ppl << endl;
     }
   }

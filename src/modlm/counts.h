@@ -57,20 +57,23 @@ public:
                                const Sentence & wids,
                                float uniform_prob,
                                bool leave_one_out,
-                               float* prob_out) const {
+                               std::vector<float*> & probs_out) const {
     auto it = cnts_.find(ctxt);
     if(it == cnts_.end()) {
-      for(size_t i = 0; i < wids.size(); i++) *(prob_out++) = uniform_prob;
+      for(size_t i = 0; i < wids.size(); i++)
+        *(probs_out[i]++) = uniform_prob;
     } else {
-      for(auto wid : wids) {
+      for(size_t i = 0; i < wids.size(); i++) {
+        auto wid = wids[i];
         auto it2 = it->second->second.find(wid);
         if(it2 == it->second->second.end()) {
-          *(prob_out++) = 0.0;
+          *(probs_out[i]++) = 0.0;
         } else if(leave_one_out) {
           float act = mod_cnt(it2->second), disc = mod_cnt(it2->second-1);
-          *(prob_out++) = disc / (it->second->first - act + disc);
+          float denom = (it->second->first - act + disc);
+          *(probs_out[i]++) = denom == 0.0 ? 0.0 : disc / denom;
         } else {
-          *(prob_out++) = mod_cnt(it2->second) / it->second->first;
+          *(probs_out[i]++) = mod_cnt(it2->second) / it->second->first;
         }
       }
     }
@@ -140,7 +143,7 @@ public:
   }
 
   virtual float mod_cnt(int cnt) const override {
-    return cnt - discounts_[std::min(cnt,(int)discounts_.size()-1)];
+    return cnt > 0 ? cnt - discounts_[std::min(cnt,(int)discounts_.size()-1)] : 0.0;
   }
   
   virtual void write(DictPtr dict, std::ostream & out) const override {

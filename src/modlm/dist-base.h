@@ -6,6 +6,17 @@
 
 namespace modlm {
 
+// A training context, where:
+// * first is a set of dense features 
+// * second is a set of word ids
+typedef std::pair<std::vector<float>, std::vector<WordId> > TrainingContext;
+
+// A training target, where:
+// * first is a dense vector of distributions
+// * second is a sparse vector of distributions
+// typedef std::pair<std::vector<float>, std::vector<std::pair<int, float> > > TrainingTarget;
+typedef std::vector<float> TrainingTarget;
+
 // A base class implementing the functions necessary for calculation
 class DistBase {
 
@@ -41,12 +52,12 @@ public:
   // And calculate these features given context, for words wids. uniform_prob
   // is the probability assigned in unknown contexts. leave_one_out indicates
   // whether we should subtract one from the counts for cross-validation.
-  // prob_out is the output.
+  // prob_out is the output, and pointers should be incremented after writing.
   virtual void calc_word_dists(const Sentence & ctxt,
                                const Sentence & wids,
                                float uniform_prob,
                                bool leave_one_out,
-                               float* prob_out) const = 0;
+                               std::vector<float*> & prob_out) const = 0;
 
   // Read/write model. If dict is null, use numerical ids, otherwise strings.
   virtual void write(DictPtr dict, std::ostream & str) const = 0;

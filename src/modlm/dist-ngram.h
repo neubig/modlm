@@ -49,7 +49,7 @@ public:
                                const Sentence & wids,
                                float uniform_prob,
                                bool leave_one_out,
-                               float* prob_out) const override;
+                               std::vector<float*> & probs_out) const override;
 
   // Read/write model. If dict is null, use numerical ids, otherwise strings.
   virtual void write(DictPtr dict, std::ostream & str) const override;
@@ -62,7 +62,7 @@ protected:
 
 
   std::vector<CountsPtr> counts_;
-  std::vector<int> ctxt_;
+  std::vector<int> ctxt_pos_;
   std::string use_which_, smoothing_;
 
 };

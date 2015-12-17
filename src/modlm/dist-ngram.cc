@@ -26,26 +26,26 @@ DistNgram::DistNgram(const std::string & sig) : DistBase(sig) {
   // Get the rest of the ctxt
   if(sig != "ngram") {
     for(auto i : boost::irange(2, (int)strs.size()))
-      ctxt_.push_back(stoi(strs[i]));
-    if(ctxt_.size() != 0) {
-      ctxt_len_ = *boost::max_element(ctxt_);
-      if(*boost::min_element(ctxt_) < 1)
+      ctxt_pos_.push_back(stoi(strs[i]));
+    if(ctxt_pos_.size() != 0) {
+      ctxt_len_ = *boost::max_element(ctxt_pos_);
+      if(*boost::min_element(ctxt_pos_) < 1)
         THROW_ERROR("Negative ctxt id in signature: " << sig); 
     }
   }
   // Create the counts, appropriately smoothed
   smoothing_ = strs[1];
-  counts_.resize(ctxt_.size()+1);
+  counts_.resize(ctxt_pos_.size()+1);
   if(smoothing_ == "lin") {
-    for(auto i : boost::irange(0, (int)ctxt_.size()+1))
+    for(auto i : boost::irange(0, (int)ctxt_pos_.size()+1))
       counts_[i].reset(new Counts);
   } else if(smoothing_ == "mabs") {
-    for(auto i : boost::irange(0, (int)ctxt_.size()+1))
+    for(auto i : boost::irange(0, (int)ctxt_pos_.size()+1))
       counts_[i].reset(new CountsMabs);
   } else if(smoothing_ == "mkn") {
-    for(auto i : boost::irange(0, (int)ctxt_.size()))
+    for(auto i : boost::irange(0, (int)ctxt_pos_.size()))
       counts_[i].reset(new CountsMkn);
-    counts_[ctxt_.size()].reset(new CountsMabs);
+    counts_[ctxt_pos_.size()].reset(new CountsMabs);
   } else {
     THROW_ERROR("Bad smoothing type in signature: " << sig);
   }
@@ -54,7 +54,7 @@ DistNgram::DistNgram(const std::string & sig) : DistBase(sig) {
 std::string DistNgram::get_sig() const {
   ostringstream oss;
   oss << "ngram_" << smoothing_;
-  for(auto i : ctxt_) oss << '_' << i;
+  for(auto i : ctxt_pos_) oss << '_' << i;
   return oss.str();
 }
 
@@ -63,7 +63,7 @@ void DistNgram::add_stats(const Sentence & sent) {
   for(auto i : boost::irange(0, (int)sent.size())) {
     WordId last_fallback = -1;
     WordId this_word = sent[i];
-    Sentence this_ctxt = calc_ctxt(sent, i, ctxt_);
+    Sentence this_ctxt = calc_ctxt(sent, i, ctxt_pos_);
     for(size_t j = counts_.size()-1; ; j--) {
       counts_[j]->add_count(this_ctxt, this_word, last_fallback);
       if(this_ctxt.size() == 0) break;
@@ -93,7 +93,7 @@ Sentence DistNgram::calc_ctxt(const Sentence & in, int pos, const Sentence & ctx
 // And calculate these features
 void DistNgram::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float* feats_out) const {
   Sentence this_ctxt;
-  for(size_t i : ctxt_)
+  for(size_t i : ctxt_pos_)
     this_ctxt.push_back(ctxt[i-1]);
   for(size_t j = counts_.size()-1; ; j--) {
     (*counts_[j]).calc_ctxt_feats(this_ctxt, held_out_wid, feats_out + 3 * j);
@@ -109,19 +109,18 @@ size_t DistNgram::get_dist_size() const {
 // And calculate these features given ctxt, for words wids. uniform_prob
 // is the probability assigned in unknown ctxts. leave_one_out indicates
 // whether we should subtract one from the counts for cross-validation.
-// prob_out is the output.
+// prob_out is output pointer, which should be incremented after writing.
 void DistNgram::calc_word_dists(const Sentence & ctxt,
                                 const Sentence & wids,
                                 float uniform_prob,
                                 bool leave_one_out,
-                                float* prob_out) const {
+                                std::vector<float*> & probs_out) const {
   Sentence this_ctxt;
-  for(size_t i : ctxt_)
-    this_ctxt.push_back(ctxt[i-1]);
-  for(size_t j = counts_.size()-1; ; j--) {
-    (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, leave_one_out, prob_out + wids.size() * j);
-    if(this_ctxt.size() == 0) break;
-    this_ctxt.resize(this_ctxt.size()-1);
+  for(size_t j = 0; j < counts_.size(); j++) {
+    (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, leave_one_out, probs_out);
+    assert(j <= ctxt_pos_.size());
+    if(j < ctxt_pos_.size())
+      this_ctxt.push_back(ctxt[ctxt_pos_[j]-1]);
   }
 }
 
