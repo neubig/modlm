@@ -2,8 +2,8 @@
 
 #include <vector>
 #include <cstdint>
+#include <memory>
 #include <cnn/dict.h>
-#include <modlm/murmur.h>
 
 namespace modlm {
 typedef std::shared_ptr<cnn::Dict> DictPtr;

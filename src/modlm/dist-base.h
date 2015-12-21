@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <string>
+#include <memory>
 #include <modlm/sentence.h>
 
 namespace modlm {

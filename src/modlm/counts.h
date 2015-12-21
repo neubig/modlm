@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <memory>
 #include <boost/algorithm/string.hpp>
 #include <modlm/macros.h>
 #include <modlm/sentence.h>

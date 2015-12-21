@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <memory>
 #include <boost/program_options.hpp>
 #include <cnn/cnn.h>
 #include <cnn/dict.h>
