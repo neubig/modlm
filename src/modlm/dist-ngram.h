@@ -40,7 +40,8 @@ public:
   virtual void calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * feats_out) const override;
 
   // Get the number of distributions we can expect from this model
-  virtual size_t get_dist_size() const override;
+  virtual size_t get_dense_size() const override { return counts_.size(); }
+  virtual size_t get_sparse_size() const override { return 0; }
   // And calculate these features given ctxt, for words wids. uniform_prob
   // is the probability assigned in unknown ctxts. leave_one_out indicates
   // whether we should subtract one from the counts for cross-validation.
@@ -49,11 +50,13 @@ public:
                                const Sentence & wids,
                                float uniform_prob,
                                bool leave_one_out,
-                               std::vector<float*> & probs_out) const override;
+                               std::vector<TrainingTarget> & trgs,
+                               int & dense_offset,
+                               int & sparse_offset) const override;
 
   // Read/write model. If dict is null, use numerical ids, otherwise strings.
   virtual void write(DictPtr dict, std::ostream & str) const override;
-  virtual void read(DictPtr dict, std::istream & str) const override;
+  virtual void read(DictPtr dict, std::istream & str) override;
 
   // Create the context
   static Sentence calc_ctxt(const Sentence & in, int pos, const Sentence & ctxid);

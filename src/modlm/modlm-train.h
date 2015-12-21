@@ -25,11 +25,11 @@ private:
   typedef std::shared_ptr<cnn::Trainer> TrainerPtr;
 
 public:
-  ModlmTrain() : num_ctxt_(0), num_dist_(0), word_hist_(0), word_rep_(50), use_context_(true) { }
+  ModlmTrain() : num_ctxt_(0), num_dense_dist_(0), num_sparse_dist_(0), word_hist_(0), word_rep_(50), use_context_(true) { }
 
   TrainerPtr GetTrainer(const std::string & trainer_id, float learning_rate, cnn::Model & model);
 
-  cnn::expr::Expression create_graph(const TrainingInstance & inst, cnn::Model & mod, cnn::ComputationGraph & cg);
+  cnn::expr::Expression create_graph(const TrainingInstance & inst, std::pair<size_t,size_t> range, cnn::Model & mod, cnn::ComputationGraph & cg);
 
   int main(int argc, char** argv);
   
@@ -52,7 +52,7 @@ protected:
   cnn::Parameters* V_;
   cnn::Parameters* a_;
 
-  int num_ctxt_, num_dist_;
+  int num_ctxt_, num_dense_dist_, num_sparse_dist_;
   int word_hist_, word_rep_;
   bool use_context_;
   

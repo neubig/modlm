@@ -102,22 +102,21 @@ void DistNgram::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, floa
   }
 }
 
-// Get the number of distributions we can expect from this model
-size_t DistNgram::get_dist_size() const {
-  return counts_.size();
-}
 // And calculate these features given ctxt, for words wids. uniform_prob
 // is the probability assigned in unknown ctxts. leave_one_out indicates
 // whether we should subtract one from the counts for cross-validation.
 // prob_out is output pointer, which should be incremented after writing.
+
 void DistNgram::calc_word_dists(const Sentence & ctxt,
                                 const Sentence & wids,
                                 float uniform_prob,
                                 bool leave_one_out,
-                                std::vector<float*> & probs_out) const {
+                                std::vector<TrainingTarget> & trgs,
+                                int & dense_offset,
+                                int & sparse_offset) const {
   Sentence this_ctxt;
   for(size_t j = 0; j < counts_.size(); j++) {
-    (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, leave_one_out, probs_out);
+    (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, leave_one_out, trgs, dense_offset);
     assert(j <= ctxt_pos_.size());
     if(j < ctxt_pos_.size())
       this_ctxt.push_back(ctxt[ctxt_pos_[j]-1]);
@@ -131,7 +130,7 @@ void DistNgram::write(DictPtr dict, std::ostream & out) const {
   for(const auto & count : counts_)
     count->write(dict, out);
 }
-void DistNgram::read(DictPtr dict, std::istream & in) const {
+void DistNgram::read(DictPtr dict, std::istream & in) {
   string line;
   if(!getline(in, line)) THROW_ERROR("Premature end at DistNgram");
   if(line != DIST_NGRAM_VERSION) THROW_ERROR("Bad version of DistNgram: " << line << endl);

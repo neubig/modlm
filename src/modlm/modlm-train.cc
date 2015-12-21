@@ -32,19 +32,27 @@ inline std::string print_vec(const std::vector<T> vec) {
   return oss.str();
 }
 
-Expression ModlmTrain::create_graph(const TrainingInstance & inst, cnn::Model & mod, cnn::ComputationGraph & cg) {
+Expression ModlmTrain::create_graph(const TrainingInstance & inst, std::pair<size_t,size_t> range, cnn::Model & mod, cnn::ComputationGraph & cg) {
 
   // Dynamically create the target vectors
-  vector<float> wdists(inst.second.size() * num_dist_), wcnts(inst.second.size());
-  size_t pos = 0;
+  int num_dist = num_dense_dist_ + num_sparse_dist_;
+  int num_words = (range.second - range.first);
+  vector<float> wdists(num_words * num_dist, 0.0), wcnts(num_words);
+  size_t pos = 0, ptr = 0;
   for(auto & kv : inst.second) {
-    memcpy(&wdists[pos * num_dist_], &kv.first[0], sizeof(float)*num_dist_);
-    wcnts[pos] = kv.second;
+    if(pos >= range.first && pos < range.second) {
+      memcpy(&wdists[ptr], &kv.first.first[0], sizeof(float)*num_dense_dist_);
+      ptr += num_dense_dist_;
+      for(auto & elem : kv.first.second)
+        wdists[ptr + elem.first] = elem.second;
+      ptr += num_sparse_dist_;
+      wcnts[pos-range.first] = kv.second;
+    }
     pos++;
   }
   // Load the targets
-  Expression probs = input(cg, {(unsigned int)num_dist_, (unsigned int)inst.second.size()}, wdists);
-  Expression counts = input(cg, {(unsigned int)inst.second.size()}, wcnts);
+  Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, wdists);
+  Expression counts = input(cg, {(unsigned int)num_words}, wcnts);
 
   // cerr << "wcnts: " << print_vec(wcnts) << endl;
   // cerr << "wdists: " << print_vec(wdists) << endl;
@@ -61,11 +69,12 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, cnn::Model & 
 
   // Do the NN computation
   if(word_hist_ != 0) {
-    vector<Expression> expr_cat(word_hist_+1);
-    expr_cat[0] = h;
+    vector<Expression> expr_cat;
+    if(inst.first.first.size() != 0)
+      expr_cat.push_back(h);
     for(size_t i = 0; i < inst.first.second.size(); i++)
-      expr_cat[i+1] = lookup(cg, reps_, inst.first.second[i]);
-    h = concatenate(expr_cat);
+      expr_cat.push_back(lookup(cg, reps_, inst.first.second[i]));
+    h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
   }
   for(size_t i = 0; i < Ws_.size(); i++)
     h = tanh( parameter(cg, Ws_[i]) * h + parameter(cg, bs_[i]) );
@@ -119,16 +128,18 @@ int ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, bo
     // Prepare the pointers for each word
     Sentence wids, wcnts;
     std::vector<float*> ptrs(cnts.second->second.size());
-    std::vector<TrainingTarget> trgs(cnts.second->second.size(), TrainingTarget(num_dist_));
+    std::vector<TrainingTarget> trgs(cnts.second->second.size(), TrainingTarget(std::vector<float>(num_dense_dist_), std::vector<std::pair<int,float> >()));
     for(auto & kv : cnts.second->second) {
-      ptrs[wids.size()] = &trgs[wids.size()][0];
       wids.push_back(kv.first);
       wcnts.push_back(kv.second);
       total_words += kv.second;
     }
+    // cerr << "wids: " << print_vec(wids) << endl;
+    // cerr << "cnts: " << print_vec(wcnts) << endl;
     // Calculate all of the distributions
+    int dense_offset = 0, sparse_offset = 0;
     for(auto dist : dists)
-      dist->calc_word_dists(cnts.first, wids, uniform_prob, hold_out, ptrs);
+      dist->calc_word_dists(cnts.first, wids, uniform_prob, hold_out, trgs, dense_offset, sparse_offset);
     // Add counts for each context
     for(int i : boost::irange(0, (int)wids.size())) {
       if(hold_out)
@@ -157,7 +168,10 @@ int ModlmTrain::main(int argc, char** argv) {
       ("epochs", po::value<int>()->default_value(300), "Number of epochs")
       ("rate_thresh",  po::value<float>()->default_value(1e-5), "Threshold for the learning rate")
       ("trainer", po::value<string>()->default_value("adam"), "Training algorithm (sgd/momentum/adagrad/adadelta/adam)")
+      ("max_minibatch", po::value<int>()->default_value(256), "Max minibatch size")
+      ("dev_epochs", po::value<int>()->default_value(10), "Run the development set every x epochs")
       ("seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
+      ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
@@ -225,7 +239,8 @@ int ModlmTrain::main(int argc, char** argv) {
   }
 
   for(auto dist : dists) {
-    num_dist_ += dist->get_dist_size();
+    num_dense_dist_ += dist->get_dense_size();
+    num_sparse_dist_ += dist->get_sparse_size();
     num_ctxt_ += dist->get_ctxt_size();
   }
 
@@ -248,6 +263,7 @@ int ModlmTrain::main(int argc, char** argv) {
     if(str != "")
       hidden_size.push_back(stoi(str));
 
+  int num_dist = num_sparse_dist_ + num_dense_dist_;
   if(use_context_) {
     int last_size = num_ctxt_ + word_rep_ * word_hist_;
     // Add the word representation and transformation functions
@@ -259,20 +275,25 @@ int ModlmTrain::main(int argc, char** argv) {
       bs_.push_back(mod.add_parameters({(unsigned int)size}));
       last_size = size;
     }
-    V_ = mod.add_parameters({(unsigned int)num_dist_, (unsigned int)last_size});
+    V_ = mod.add_parameters({(unsigned int)num_dist, (unsigned int)last_size});
   }
-  a_ = mod.add_parameters({(unsigned int)num_dist_});
+  a_ = mod.add_parameters({(unsigned int)num_dist});
+
+  size_t max_minibatch = vm_["max_minibatch"].as<int>();
+  size_t dev_epochs = vm_["dev_epochs"].as<int>();
 
   // Train a neural network to predict the interpolation coefficients
   for(int epoch = 1; epoch <= epochs_; epoch++) {
     float train_loss = 0.0, test_loss = 0.0;
     for(auto inst : train_inst) {
-      cnn::ComputationGraph cg;
-      create_graph(inst, mod, cg);
-      train_loss += cnn::as_scalar(cg.forward());
-      cg.backward();
-      if(epoch <= 2)
-        trainer->update();
+      for(size_t i = 0; i < inst.second.size(); i += max_minibatch) {
+        cnn::ComputationGraph cg;
+        create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch)), mod, cg);
+        train_loss += cnn::as_scalar(cg.forward());
+        cg.backward();
+        if(epoch <= 2)
+          trainer->update();
+      }
     }
     if(epoch > 2)
       trainer->update();
@@ -280,11 +301,16 @@ int ModlmTrain::main(int argc, char** argv) {
     float train_ppl = exp(train_loss/train_words);
     cout << "trn loss epoch " << epoch << ": " << train_ppl << endl;
     // Test PPL
-    if(epoch % 10 == 0) {
+    if(epoch % dev_epochs == 0) {
       for(auto inst : test_inst) {
-        cnn::ComputationGraph cg;
-        create_graph(inst, mod, cg);
-        test_loss += cnn::as_scalar(cg.forward());
+        for(size_t i = 0; i < inst.second.size(); i += max_minibatch) {
+          cnn::ComputationGraph cg;
+          create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch)), mod, cg);
+          test_loss += cnn::as_scalar(cg.forward());
+        }
+        // cnn::ComputationGraph cg;
+        // create_graph(inst, make_pair(0, inst.second.size()), mod, cg);
+        // test_loss += cnn::as_scalar(cg.forward());
       }
       float test_ppl = exp(test_loss/test_words);
       cout << "--- tst loss epoch " << epoch << ": " << test_ppl << endl;

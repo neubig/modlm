@@ -5,6 +5,7 @@ LIBCPP = \
   sentence.cc \
   dist-factory.cc \
   dist-ngram.cc \
+  dist-one-hot.cc \
   timer.cc \
   modlm-train.cc \
   dist-train.cc

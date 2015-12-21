@@ -57,26 +57,28 @@ public:
                                const Sentence & wids,
                                float uniform_prob,
                                bool leave_one_out,
-                               std::vector<float*> & probs_out) const {
+                               std::vector<TrainingTarget> & trgs,
+                               int & dense_offset) const {
     auto it = cnts_.find(ctxt);
     if(it == cnts_.end()) {
       for(size_t i = 0; i < wids.size(); i++)
-        *(probs_out[i]++) = uniform_prob;
+        trgs[i].first[dense_offset] = uniform_prob;
     } else {
       for(size_t i = 0; i < wids.size(); i++) {
         auto wid = wids[i];
         auto it2 = it->second->second.find(wid);
         if(it2 == it->second->second.end()) {
-          *(probs_out[i]++) = 0.0;
+          trgs[i].first[dense_offset] = 0.0;
         } else if(leave_one_out) {
           float act = mod_cnt(it2->second), disc = mod_cnt(it2->second-1);
           float denom = (it->second->first - act + disc);
-          *(probs_out[i]++) = denom == 0.0 ? 0.0 : disc / denom;
+          trgs[i].first[dense_offset] = denom == 0.0 ? 0.0 : disc / denom;
         } else {
-          *(probs_out[i]++) = mod_cnt(it2->second) / it->second->first;
+          trgs[i].first[dense_offset] = mod_cnt(it2->second) / it->second->first;
         }
       }
     }
+    dense_offset++;
   }
 
   virtual void write(DictPtr dict, std::ostream & out) const {
