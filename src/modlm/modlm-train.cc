@@ -170,6 +170,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("trainer", po::value<string>()->default_value("adam"), "Training algorithm (sgd/momentum/adagrad/adadelta/adam)")
       ("max_minibatch", po::value<int>()->default_value(256), "Max minibatch size")
       ("dev_epochs", po::value<int>()->default_value(10), "Run the development set every x epochs")
+      ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
       ("seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
@@ -281,6 +282,7 @@ int ModlmTrain::main(int argc, char** argv) {
 
   size_t max_minibatch = vm_["max_minibatch"].as<int>();
   size_t dev_epochs = vm_["dev_epochs"].as<int>();
+  int online_epochs = vm_["online_epochs"].as<int>();
 
   // Train a neural network to predict the interpolation coefficients
   for(int epoch = 1; epoch <= epochs_; epoch++) {
@@ -291,11 +293,11 @@ int ModlmTrain::main(int argc, char** argv) {
         create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch)), mod, cg);
         train_loss += cnn::as_scalar(cg.forward());
         cg.backward();
-        if(epoch <= 2)
+        if(online_epochs == -1 && epoch <= online_epochs)
           trainer->update();
       }
     }
-    if(epoch > 2)
+    if(online_epochs != -1 && epoch > online_epochs)
       trainer->update();
     trainer->update_epoch();
     float train_ppl = exp(train_loss/train_words);
