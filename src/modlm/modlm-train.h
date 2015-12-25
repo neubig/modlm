@@ -2,20 +2,28 @@
 
 #include <string>
 #include <memory>
-#include <boost/program_options.hpp>
-#include <cnn/cnn.h>
-#include <cnn/dict.h>
-#include <cnn/tensor.h>
-#include <cnn/expr.h>
+#include <unordered_map>
 #include <modlm/sentence.h>
-#include <modlm/dist-base.h>
+#include <modlm/training-data.h>
+#include <modlm/hashes.h>
 
 namespace cnn {
-struct Trainer;
-class Model;
+  class Model;
+  class Dict;
+  struct Trainer;
+  struct ComputationGraph;
+  struct LookupParameters;
+  struct Parameters;
+  namespace expr {
+    struct Expression;
+  }
 }
 
 namespace modlm {
+
+class DistBase;
+typedef std::shared_ptr<DistBase> DistPtr;
+typedef std::shared_ptr<cnn::Dict> DictPtr;
 
 // A data structure for training instances
 typedef std::unordered_map<TrainingContext, std::unordered_map<TrainingTarget, int> > TrainingData;
@@ -37,9 +45,6 @@ public:
 protected:
 
   int create_instances(const std::vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const std::string & file_name, TrainingData & data);
-
-
-  boost::program_options::variables_map vm_;
 
   // Variable settings
   int epochs_;

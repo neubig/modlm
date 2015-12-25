@@ -1,14 +1,16 @@
 ####### Library info
 
 LIBCPP = \
-  macros.cc \
-  sentence.cc \
-  dist-factory.cc \
-  dist-ngram.cc \
-  dist-one-hot.cc \
-  timer.cc \
   modlm-train.cc \
-  dist-train.cc
+  dist-train.cc \
+  dist-ngram.cc \
+  counts.cc \
+  dict-utils.cc \
+  dist-factory.cc \
+  dist-one-hot.cc \
+  dist-uniform.cc \
+  timer.cc \
+  macros.cc
 
 
 AM_CXXFLAGS = $(BOOST_CPPFLAGS) $(EIGEN_CPPFLAGS) $(CNN_CPPFLAGS) $(OPENMP_CXXFLAGS) -I$(srcdir)/..

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <modlm/dist-base.h>
-#include <modlm/sentence.h>
 
 namespace modlm {
 

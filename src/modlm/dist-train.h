@@ -1,8 +1,6 @@
 #pragma once
 
-
 #include <string>
-#include <boost/program_options.hpp>
 
 namespace modlm {
 
@@ -14,8 +12,6 @@ public:
   int main(int argc, char** argv);
   
 protected:
-
-  boost::program_options::variables_map vm_;
 
   // Variable settings
   std::string model_out_file_;

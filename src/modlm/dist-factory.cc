@@ -1,9 +1,11 @@
+#include <fstream>
 #include <modlm/dist-factory.h>
 #include <modlm/dist-ngram.h>
 #include <modlm/dist-uniform.h>
 #include <modlm/dist-one-hot.h>
 #include <modlm/sentence.h>
-#include <fstream>
+#include <modlm/macros.h>
+
 
 using namespace std;
 using namespace modlm;
