@@ -54,7 +54,7 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, std::pair<siz
   Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, wdists);
   Expression counts = input(cg, {(unsigned int)num_words}, wcnts);
 
-  // cerr << "wcnts: " << print_vec(wcnts) << endl;
+  cerr << "wcnts: " << print_vec(wcnts) << endl;
   // cerr << "wdists: " << print_vec(wdists) << endl;
 
   // If not using context, it's really simple
@@ -67,13 +67,18 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, std::pair<siz
   // Add the context for this instance
   Expression h = input(cg, {(unsigned int)inst.first.first.size()}, inst.first.first);
 
+
   // Do the NN computation
   if(word_hist_ != 0) {
     vector<Expression> expr_cat;
     if(inst.first.first.size() != 0)
       expr_cat.push_back(h);
-    for(size_t i = 0; i < inst.first.second.size(); i++)
+    cerr << "wreps:";
+    for(size_t i = 0; i < inst.first.second.size(); i++) {
       expr_cat.push_back(lookup(cg, reps_, inst.first.second[i]));
+      cerr << " " << inst.first.second[i];
+    }
+    cerr << endl;
     h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
   }
   for(size_t i = 0; i < Ws_.size(); i++)
@@ -293,7 +298,7 @@ int ModlmTrain::main(int argc, char** argv) {
         create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch)), mod, cg);
         train_loss += cnn::as_scalar(cg.forward());
         cg.backward();
-        if(online_epochs == -1 && epoch <= online_epochs)
+        if(online_epochs == -1 || epoch <= online_epochs)
           trainer->update();
       }
     }
