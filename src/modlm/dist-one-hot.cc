@@ -3,6 +3,7 @@
 #include <boost/range/algorithm/min_element.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/range/irange.hpp>
+#include <cnn/dict.h>
 #include <modlm/macros.h>
 #include <modlm/dist-one-hot.h>
 

@@ -4,7 +4,6 @@
 #include <string>
 #include <modlm/sentence.h>
 #include <modlm/dist-base.h>
-#include <modlm/counts.h>
 
 namespace modlm {
 
@@ -14,10 +13,7 @@ class DistUniform : public DistBase {
 public:
 
   // Signature should be of the form "uniform"
-  DistUniform(const std::string & sig) : DistBase(sig) {
-    if(sig != "uniform")
-      THROW_ERROR("Bad signature: " << sig);
-  }
+  DistUniform(const std::string & sig);
   virtual ~DistUniform() { }
 
   // Get the signature of this class that uniquely identifies it for loading
@@ -46,11 +42,7 @@ public:
                                bool leave_one_out,
                                std::vector<TrainingTarget> & trgs,
                                int & dense_offset,
-                               int & sparse_offset) const override {
-    for(size_t i = 0; i < wids.size(); i++) 
-      trgs[i].first[dense_offset] = uniform_prob;
-    dense_offset++;
-  }
+                               int & sparse_offset) const override;
 
   // Read/write model. If dict is null, use numerical ids, otherwise strings.
   virtual void write(DictPtr dict, std::ostream & str) const override { }

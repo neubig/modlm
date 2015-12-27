@@ -5,6 +5,7 @@
 #include <boost/range/irange.hpp>
 #include <modlm/macros.h>
 #include <modlm/dist-ngram.h>
+#include <modlm/counts.h>
 
 using namespace std;
 using namespace modlm;

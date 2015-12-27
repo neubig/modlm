@@ -4,9 +4,11 @@
 #include <string>
 #include <modlm/sentence.h>
 #include <modlm/dist-base.h>
-#include <modlm/counts.h>
 
 namespace modlm {
+
+class Counts;
+typedef std::shared_ptr<Counts> CountsPtr;
 
 // A class for the n-gram distribution
 class DistNgram : public DistBase {

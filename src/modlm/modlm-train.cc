@@ -17,6 +17,7 @@
 #include <modlm/counts.h>
 #include <modlm/dist-ngram.h>
 #include <modlm/dist-factory.h>
+#include <modlm/dict-utils.h>
 
 using namespace std;
 using namespace modlm;
@@ -182,6 +183,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
       ;
+  boost::program_options::variables_map vm_;
   po::store(po::parse_command_line(argc, argv, desc), vm_);
   po::notify(vm_);   
   if (vm_.count("help")) {

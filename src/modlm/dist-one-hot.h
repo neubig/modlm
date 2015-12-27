@@ -2,9 +2,9 @@
 
 #include <iostream>
 #include <string>
+#include <unordered_map>
 #include <modlm/sentence.h>
 #include <modlm/dist-base.h>
-#include <modlm/counts.h>
 
 namespace modlm {
 
