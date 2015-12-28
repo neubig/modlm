@@ -44,6 +44,7 @@ public:
   virtual void calc_word_dists(const Sentence & ctxt,
                                const Sentence & wids,
                                float uniform_prob,
+                               float unk_prob,
                                bool leave_one_out,
                                std::vector<TrainingTarget> & trgs,
                                int & dense_offset,

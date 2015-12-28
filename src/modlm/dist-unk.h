@@ -8,18 +8,18 @@
 namespace modlm {
 
 // A class for the n-gram distribution
-class DistUniform : public DistBase {
+class DistUnk : public DistBase {
 
 public:
 
   // Signature should be of the form "uniform"
-  DistUniform(const std::string & sig);
-  virtual ~DistUniform() { }
+  DistUnk(const std::string & sig);
+  virtual ~DistUnk() { }
 
   // Get the signature of this class that uniquely identifies it for loading
   // at test time. In other words, the signature can collapse any information
   // only needed at training time.
-  virtual std::string get_sig() const override { return "uniform"; }
+  virtual std::string get_sig() const override { return "unk"; }
 
   // Add stats from one sentence at training time for count-based models
   virtual void add_stats(const Sentence & sent) override { }

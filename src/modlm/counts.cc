@@ -42,13 +42,14 @@ void Counts::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float *
 void Counts::calc_word_dists(const Sentence & ctxt,
                              const Sentence & wids,
                              float uniform_prob,
+                             float unk_prob,
                              bool leave_one_out,
                              std::vector<TrainingTarget> & trgs,
                              int & dense_offset) const {
   auto it = cnts_.find(ctxt);
   if(it == cnts_.end()) {
-    for(size_t i = 0; i < wids.size(); i++)
-      trgs[i].first[dense_offset] = uniform_prob;
+    for(size_t i = 0; i < wids.size(); i++) 
+      trgs[i].first[dense_offset] = (wids[i] == 0 ? unk_prob * uniform_prob : uniform_prob);
   } else {
     for(size_t i = 0; i < wids.size(); i++) {
       auto wid = wids[i];
@@ -62,6 +63,7 @@ void Counts::calc_word_dists(const Sentence & ctxt,
       } else {
         trgs[i].first[dense_offset] = mod_cnt(it2->second) / it->second->first;
       }
+      if(wids[i] == 0) trgs[i].first[dense_offset] *= unk_prob;
     }
   }
   dense_offset++;

@@ -24,12 +24,10 @@ std::string DistOneHot::get_sig() const {
 // Add stats from one sentence at training time for count-based models
 void DistOneHot::add_stats(const Sentence & sent) {
   for(auto w : sent) {
-    if(w != 0) {
-      auto it = mapping_.find(w);
-      if(it == mapping_.end()) {
-        mapping_[w] = back_mapping_.size();
-        back_mapping_.push_back(w);
-      }
+    auto it = mapping_.find(w);
+    if(it == mapping_.end()) {
+      mapping_[w] = back_mapping_.size();
+      back_mapping_.push_back(w);
     }
   }
 }
@@ -53,17 +51,16 @@ void DistOneHot::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, flo
 void DistOneHot::calc_word_dists(const Sentence & ctxt,
                                  const Sentence & wids,
                                  float uniform_prob,
+                                 float unk_prob,
                                  bool leave_one_out,
                                  std::vector<TrainingTarget> & trgs,
                                  int & dense_offset,
                                  int & sparse_offset) const {
   assert(wids.size() == trgs.size());
   for(size_t i = 0; i < wids.size(); i++) {
-    if(wids[i] != 0) {
-      auto it = mapping_.find(wids[i]);
-      if(it != mapping_.end())
-        trgs[i].second.push_back(make_pair(sparse_offset+it->second-1, 1.0));
-    }
+    auto it = mapping_.find(wids[i]);
+    if(it != mapping_.end())
+      trgs[i].second.push_back(make_pair(sparse_offset+it->second-1, (wids[i] == 0 ? unk_prob : 1.0)));
   }
   sparse_offset += mapping_.size();
 }

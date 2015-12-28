@@ -111,13 +111,14 @@ void DistNgram::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, floa
 void DistNgram::calc_word_dists(const Sentence & ctxt,
                                 const Sentence & wids,
                                 float uniform_prob,
+                                float unk_prob,
                                 bool leave_one_out,
                                 std::vector<TrainingTarget> & trgs,
                                 int & dense_offset,
                                 int & sparse_offset) const {
   Sentence this_ctxt;
   for(size_t j = 0; j < counts_.size(); j++) {
-    (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, leave_one_out, trgs, dense_offset);
+    (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, unk_prob, leave_one_out, trgs, dense_offset);
     assert(j <= ctxt_pos_.size());
     if(j < ctxt_pos_.size())
       this_ctxt.push_back(ctxt[ctxt_pos_[j]-1]);

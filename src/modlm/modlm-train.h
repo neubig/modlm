@@ -44,7 +44,7 @@ public:
   
 protected:
 
-  int create_instances(const std::vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const std::string & file_name, TrainingData & data);
+  std::pair<int,int> create_instances(const std::vector<DistPtr> & dists, int max_ctxt, bool hold_out, bool penalize_unk, const DictPtr dict, const std::string & file_name, TrainingData & data);
 
   // Variable settings
   int epochs_;

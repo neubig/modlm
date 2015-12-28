@@ -2,6 +2,7 @@
 #include <modlm/dist-factory.h>
 #include <modlm/dist-ngram.h>
 #include <modlm/dist-uniform.h>
+#include <modlm/dist-unk.h>
 #include <modlm/dist-one-hot.h>
 #include <modlm/sentence.h>
 #include <modlm/macros.h>
@@ -15,6 +16,8 @@ DistPtr DistFactory::create_dist(const std::string & sig) {
     return DistPtr(new DistNgram(sig));
   } else if(sig == "uniform") {
     return DistPtr(new DistUniform(sig));
+  } else if(sig == "unk") {
+    return DistPtr(new DistUnk(sig));
   } else if(sig == "onehot") {
     return DistPtr(new DistOneHot(sig));
   } else {

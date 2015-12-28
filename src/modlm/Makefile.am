@@ -9,6 +9,7 @@ LIBCPP = \
   dist-factory.cc \
   dist-one-hot.cc \
   dist-uniform.cc \
+  dist-unk.cc \
   timer.cc \
   macros.cc
 

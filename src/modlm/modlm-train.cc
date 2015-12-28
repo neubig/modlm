@@ -97,9 +97,10 @@ inline void calc_all_contexts(const vector<DistPtr> & dists, const Sentence & se
    }
 }
 
-int ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const std::string & file_name, TrainingData & data) {
+std::pair<int,int> ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, bool penalize_unk, bool hold_out, const DictPtr dict, const std::string & file_name, TrainingData & data) {
 
   float uniform_prob = 1.0/dict->size();
+  float unk_prob = (penalize_unk ? uniform_prob : 1);
   pair<int,CountsPtr> ret(0, CountsPtr(new Counts));
 
   // Load counts
@@ -118,7 +119,7 @@ int ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, bo
   }
 
   // Create training data (num words, ctxt features, each model, true counts)
-  int total_words = 0;
+  pair<int,int> total_words(0,0);
   // Create and allocate the targets:
   TrainingContext ctxt;
   ctxt.first.resize(num_ctxt_);
@@ -137,14 +138,15 @@ int ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, bo
     for(auto & kv : cnts.second->second) {
       wids.push_back(kv.first);
       wcnts.push_back(kv.second);
-      total_words += kv.second;
+      total_words.first += kv.second;
+      if(kv.first == 0) total_words.second += kv.second;
     }
     // cerr << "wids: " << print_vec(wids) << endl;
     // cerr << "cnts: " << print_vec(wcnts) << endl;
     // Calculate all of the distributions
     int dense_offset = 0, sparse_offset = 0;
     for(auto dist : dists)
-      dist->calc_word_dists(cnts.first, wids, uniform_prob, hold_out, trgs, dense_offset, sparse_offset);
+      dist->calc_word_dists(cnts.first, wids, uniform_prob, unk_prob, hold_out, trgs, dense_offset, sparse_offset);
     // Add counts for each context
     for(int i : boost::irange(0, (int)wids.size())) {
       if(hold_out)
@@ -176,6 +178,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("max_minibatch", po::value<int>()->default_value(256), "Max minibatch size")
       ("dev_epochs", po::value<int>()->default_value(10), "Run the development set every x epochs")
       ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
+      ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
       ("seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
@@ -257,14 +260,17 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Read in the data
   TrainingData train_inst, test_inst;
-  int train_words = create_instances(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_file_, train_inst);
-  int test_words  = create_instances(dists, max_ctxt, false, dict, test_files_[0], test_inst);
+  pair<int,int> train_words = create_instances(dists, max_ctxt, vm_["hold_out"].as<bool>(), vm_["penalize_unk"].as<bool>(), dict, train_file_, train_inst);
+  pair<int,int> test_words  = create_instances(dists, max_ctxt, false, vm_["penalize_unk"].as<bool>(), dict, test_files_[0], test_inst);
   dists.clear();
 
   // Initialize
   cnn::Model mod;
   TrainerPtr trainer = GetTrainer(vm_["trainer"].as<string>(), vm_["learning_rate"].as<float>(), mod);
   trainer->clipping_enabled = vm_["clipping_enabled"].as<bool>();
+
+  float uniform_prob = 1.0/dict->size();
+  float log_unk_prob = vm_["penalize_unk"].as<bool>() ? log(uniform_prob) : 0;
 
   boost::split(strs, vm_["layers"].as<string>(), boost::is_any_of(" "));
   vector<int> hidden_size;
@@ -295,6 +301,7 @@ int ModlmTrain::main(int argc, char** argv) {
   // Train a neural network to predict the interpolation coefficients
   for(int epoch = 1; epoch <= epochs_; epoch++) {
     float train_loss = 0.0, test_loss = 0.0;
+    Timer time;
     for(auto inst : train_inst) {
       for(size_t i = 0; i < inst.second.size(); i += max_minibatch) {
         cnn::ComputationGraph cg;
@@ -310,10 +317,14 @@ int ModlmTrain::main(int argc, char** argv) {
     trainer->update_epoch();
     if(train_loss != train_loss)
       THROW_ERROR("Train loss is not a number");
-    float train_ppl = exp(train_loss/train_words);
-    cout << "trn loss epoch " << epoch << ": " << train_ppl << endl;
+    float train_ppl = exp(train_loss/train_words.first);
+    float train_ppl_nounk = exp((train_loss + train_words.second * log_unk_prob)/train_words.first);
+    float train_elapsed = time.Elapsed();
+    float train_wps = train_words.first / train_elapsed;
+    cout << "-- trn epoch " << epoch << ": ppl=" << train_ppl << "   (ppl_nounk=" << train_ppl_nounk << ", s=" << train_elapsed << ", wps=" << train_wps << ")" << endl;
     // Test PPL
     if(epoch % dev_epochs == 0) {
+      time = Timer();
       for(auto inst : test_inst) {
         for(size_t i = 0; i < inst.second.size(); i += max_minibatch) {
           cnn::ComputationGraph cg;
@@ -324,8 +335,11 @@ int ModlmTrain::main(int argc, char** argv) {
         // create_graph(inst, make_pair(0, inst.second.size()), mod, cg);
         // test_loss += cnn::as_scalar(cg.forward());
       }
-      float test_ppl = exp(test_loss/test_words);
-      cout << "--- tst loss epoch " << epoch << ": " << test_ppl << endl;
+      float test_ppl = exp(test_loss/test_words.first);
+      float test_ppl_nounk = exp((test_loss + test_words.second * log_unk_prob)/test_words.first);
+      float test_elapsed = time.Elapsed();
+      float test_wps = test_words.first / test_elapsed;
+      cout << "   tst epoch " << epoch << ": ppl=" << test_ppl << "   (ppl_nounk=" << test_ppl_nounk << ", s=" << test_elapsed << ", wps=" << test_wps << ")" << endl;
     }
   }
 
