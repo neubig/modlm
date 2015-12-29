@@ -31,36 +31,53 @@ inline std::string print_vec(const std::vector<T> vec) {
   return oss.str();
 }
 
+void ModlmTrain::print_status(const std::string & strid, int epoch, float loss, pair<int,int> words, float percent, float elapsed) {
+  float ppl = exp(loss/words.first);
+  float ppl_nounk = exp((loss + words.second * log_unk_prob_)/words.first);
+  float wps = words.first / elapsed;
+  cout << strid << " epoch " << epoch;
+  if(percent >= 0) cout << " (" << percent << "%)";
+  cout << ": ppl=" << ppl << "   (";
+  if(penalize_unk_ && words.second != -1) cout << "ppl_nounk=" << ppl_nounk << ", ";
+  cout << "s=" << elapsed << ", wps=" << wps << ")" << endl;
+}
 
 float ModlmTrain::calc_instance(const TrainingData & data, const std::string & strid, std::pair<int,int> words, bool update, int epoch, TrainerPtr & trainer, cnn::Model & mod) {
-  float loss = 0.0;
+  float loss = 0.0, print_every = 60.0, elapsed;
+  float last_print = 0;
   Timer time;
+  pair<int,int> curr_words(0,-1);
+  int data_done = 0;
   for(auto inst : data) {
     for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
       cnn::ComputationGraph cg;
-      create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), mod, cg);
+      create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), curr_words, mod, cg);
       loss += cnn::as_scalar(cg.forward());
-      cg.backward();
-      if(update && (online_epochs_ == -1 || epoch <= online_epochs_))
-        trainer->update();
+      if(loss != loss) THROW_ERROR("Loss is not a number");
+      if(update) {
+        cg.backward();
+        if(online_epochs_ == -1 || epoch <= online_epochs_)
+          trainer->update();
+      }
+    }
+    elapsed = time.Elapsed();
+    data_done++;
+    if(elapsed > last_print + print_every) {
+      print_status(strid, epoch, loss, curr_words, 100.0*curr_words.first/words.first, elapsed);
+      last_print += print_every;
     }
   }
-  if(update && online_epochs_ != -1 && epoch > online_epochs_)
-    trainer->update();
-  trainer->update_epoch();
-  if(loss != loss)
-    THROW_ERROR("Loss is not a number");
-  float ppl = exp(loss/words.first);
-  float ppl_nounk = exp((loss + words.second * log_unk_prob_)/words.first);
-  float elapsed = time.Elapsed();
-  float wps = words.first / elapsed;
-  cout << strid << " epoch " << epoch << ": ppl=" << ppl << "   (";
-  if(penalize_unk_) cout << "ppl_nounk=" << ppl_nounk << ", ";
-  cout << "s=" << elapsed << ", wps=" << wps << ")" << endl;
+  elapsed = time.Elapsed();
+  print_status(strid, epoch, loss, words, -1, elapsed);
+  if(update) {
+    if(online_epochs_ != -1 && epoch > online_epochs_)
+      trainer->update();
+    trainer->update_epoch();
+  }
   return loss;
 }
 
-Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,size_t> range, cnn::Model & mod, cnn::ComputationGraph & cg) {
+Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, cnn::Model & mod, cnn::ComputationGraph & cg) {
 
   // Dynamically create the target vectors
   int num_dist = num_dense_dist_ + num_sparse_dist_;
@@ -75,6 +92,7 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
         wdists[ptr + elem.first] = elem.second;
       ptr += num_sparse_dist_;
       wcnts[pos-range.first] = kv.second;
+      words.first += kv.second;
     }
     pos++;
   }
@@ -205,12 +223,12 @@ int ModlmTrain::main(int argc, char** argv) {
       ("rate_thresh",  po::value<float>()->default_value(1e-5), "Threshold for the learning rate")
       ("trainer", po::value<string>()->default_value("adam"), "Training algorithm (sgd/momentum/adagrad/adadelta/adam)")
       ("max_minibatch", po::value<int>()->default_value(256), "Max minibatch size")
-      ("dev_epochs", po::value<int>()->default_value(10), "Run the development set every x epochs")
       ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
       ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
       ("seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
+      ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
@@ -231,8 +249,11 @@ int ModlmTrain::main(int argc, char** argv) {
   penalize_unk_ = vm_["penalize_unk"].as<bool>();
   epochs_ = vm_["epochs"].as<int>();
   max_minibatch_ = vm_["max_minibatch"].as<int>();
-  dev_epochs_ = vm_["dev_epochs"].as<int>();
   online_epochs_ = vm_["online_epochs"].as<int>();
+  trainer_ = vm_["trainer"].as<string>();
+  learning_rate_ = vm_["learning_rate"].as<float>();
+  clipping_enabled_ = vm_["clipping_enabled"].as<bool>();
+  float rate_decay = vm_["rate_decay"].as<float>();
 
   // Set random seed if necessary
   int seed = vm_["seed"].as<int>();
@@ -316,8 +337,8 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Initialize
   cnn::Model mod;
-  TrainerPtr trainer = GetTrainer(vm_["trainer"].as<string>(), vm_["learning_rate"].as<float>(), mod);
-  trainer->clipping_enabled = vm_["clipping_enabled"].as<bool>();
+  TrainerPtr trainer = get_trainer(trainer_, learning_rate_, mod);
+  trainer->clipping_enabled = clipping_enabled_;
 
   float uniform_prob = 1.0/dict->size();
   log_unk_prob_ = vm_["penalize_unk"].as<bool>() ? log(uniform_prob) : 0;
@@ -350,21 +371,27 @@ int ModlmTrain::main(int argc, char** argv) {
     calc_instance(train_inst, "-- trn ", train_words, true, epoch, trainer, mod);
     if(valid_inst.size() != 0) {
       float valid_loss = calc_instance(valid_inst, "   vld ", valid_words, false, epoch, trainer, mod);
-      if(last_valid < valid_loss) {
-        trainer->eta *= 0.8;
-        cout << "*** Reduced learning rate to " << trainer->eta << endl;
+      if(rate_decay != 1.0 && last_valid < valid_loss) {
+        trainer->eta0 *= rate_decay;
+        cout << "*** Reduced learning rate to " << trainer->eta0 << endl;
       }
+      last_valid = valid_loss;
     }
     for(size_t i = 0; i < test_inst.size(); i++) {
       ostringstream oss;
       calc_instance(test_inst[i], "   tst" + to_string(i), test_words[i], false, epoch, trainer, mod);
+    }
+    // Reset the trainer after online learning
+    if(epoch == online_epochs_) {
+      trainer = get_trainer(trainer_, learning_rate_, mod);
+      trainer->clipping_enabled = clipping_enabled_;
     }
   }
 
   return 0;
 }
 
-ModlmTrain::TrainerPtr ModlmTrain::GetTrainer(const string & trainer_id, float learning_rate, cnn::Model & model) {
+ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float learning_rate, cnn::Model & model) {
     TrainerPtr trainer;
     if(trainer_id == "sgd") {
         trainer.reset(new cnn::SimpleSGDTrainer(&model, 1e-6, learning_rate));
