@@ -16,6 +16,8 @@
 #include <modlm/dist-ngram.h>
 #include <modlm/dist-factory.h>
 #include <modlm/dict-utils.h>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/text_oarchive.hpp>
 
 using namespace std;
 using namespace modlm;
@@ -152,7 +154,7 @@ pair<int,int> ModlmTrain::create_instances(const vector<DistPtr> & dists, int ma
   // Load counts
   {
     ifstream in(file_name);
-    if(!in) THROW_ERROR("Could not open " << file_name);
+    if(!in) THROW_ERROR("Could not open in create_instances: " << file_name);
     string line;
     Sentence ctxt;
     for(int i = 1; i <= max_ctxt; i++)
@@ -204,6 +206,20 @@ pair<int,int> ModlmTrain::create_instances(const vector<DistPtr> & dists, int ma
   return total_words;
 }
 
+inline std::vector<std::string> split_wildcarded(const std::string & str, const std::vector<std::string> & wildcards, const std::string & delimiter, bool skip_first_wildcard) {
+  std::vector<std::string> ret;
+  auto end = str.find("WILD");
+  if(end != string::npos) {
+    string left = str.substr(0, end);
+    string right = str.substr(end+4);
+    for(size_t i = (skip_first_wildcard ? 1 : 0); i < wildcards.size(); i++)
+      ret.push_back(left+wildcards[i]+right);
+  } else {
+    boost::split(ret, str, boost::is_any_of(delimiter));
+  }
+  return ret;
+}
+
 int ModlmTrain::main(int argc, char** argv) {
   po::options_description desc("*** modlm-train (by Graham Neubig) ***");
   desc.add_options()
@@ -217,14 +233,15 @@ int ModlmTrain::main(int argc, char** argv) {
       ("word_rep", po::value<int>()->default_value(50), "Word representation size")
       ("hold_out", po::value<bool>()->default_value(false), "Whether to perform holding one out")
       ("use_context", po::value<bool>()->default_value(true), "If set to false, learn context-independent coefficients")
-      // ("model_out", po::value<string>()->default_value(""), "File to write the model to")
-      // ("model_in", po::value<string>()->default_value(""), "If resuming training, read the model in")
+      ("model_out", po::value<string>()->default_value(""), "File to write the model to")
+      ("model_in", po::value<string>()->default_value(""), "If resuming training, read the model in")
       ("epochs", po::value<int>()->default_value(300), "Number of epochs")
       ("rate_thresh",  po::value<float>()->default_value(1e-5), "Threshold for the learning rate")
       ("trainer", po::value<string>()->default_value("adam"), "Training algorithm (sgd/momentum/adagrad/adadelta/adam)")
       ("max_minibatch", po::value<int>()->default_value(256), "Max minibatch size")
       ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
       ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
+      ("wildcards", po::value<string>()->default_value(""), "Wildcards in model/data names for cross validation")
       ("seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
@@ -254,6 +271,7 @@ int ModlmTrain::main(int argc, char** argv) {
   learning_rate_ = vm_["learning_rate"].as<float>();
   clipping_enabled_ = vm_["clipping_enabled"].as<bool>();
   float rate_decay = vm_["rate_decay"].as<float>();
+  string model_out_file = vm_["model_out"].as<string>();
 
   // Set random seed if necessary
   int seed = vm_["seed"].as<int>();
@@ -262,13 +280,14 @@ int ModlmTrain::main(int argc, char** argv) {
     cnn::rndeng = new mt19937(seed);
   }
 
-  // Other sanity checks
-  vector<string> train_files, test_files;
+  // Get files:
+  vector<string> train_files, wildcards, test_files;
   string valid_file;
-  try { boost::split(train_files, vm_["train_file"].as<string>(), boost::is_any_of("|")); } catch(exception & e) { }
+  boost::split(wildcards, vm_["wildcards"].as<string>(), boost::is_any_of(" "));
+  train_files = split_wildcarded(vm_["train_file"].as<string>(), wildcards, "|", true);
   if(train_files.size() < 1 || train_files[0] == "") THROW_ERROR("Must specify at least one --train_file");
-  try { valid_file = vm_["valid_file"].as<string>(); } catch(exception & e) { }
-  try { boost::split(test_files, vm_["test_file"].as<string>(), boost::is_any_of("|")); } catch(exception & e) { }
+  valid_file = vm_["valid_file"].as<string>();
+  boost::split(test_files, vm_["test_file"].as<string>(), boost::is_any_of("|"));
   if(test_files.size() < 1 || test_files[0] == "") THROW_ERROR("Must specify at least one --test_file");
 
   // Temporary buffers
@@ -296,8 +315,7 @@ int ModlmTrain::main(int argc, char** argv) {
   vector<vector<string> > model_locs;
   boost::split(model_types, vm_["dist_models"].as<string>(), boost::is_any_of(" "));
   for(auto str : model_types) {
-    vector<string> my_locs;
-    boost::split(my_locs, str, boost::is_any_of("|"));
+    vector<string> my_locs = split_wildcarded(str, wildcards, "|", false);
     if(my_locs.size() != 1 && my_locs.size() != train_files.size() + 1)
       THROW_ERROR("When using cross-validation on the training data, must have appropriate model size.");
     model_locs.push_back(my_locs);
@@ -366,7 +384,7 @@ int ModlmTrain::main(int argc, char** argv) {
   a_ = mod.add_parameters({(unsigned int)num_dist});
 
   // Train a neural network to predict the interpolation coefficients
-  float last_valid = 1e99;
+  float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; epoch++) { 
     calc_instance(train_inst, "-- trn ", train_words, true, epoch, trainer, mod);
     if(valid_inst.size() != 0) {
@@ -376,6 +394,14 @@ int ModlmTrain::main(int argc, char** argv) {
         cout << "*** Reduced learning rate to " << trainer->eta0 << endl;
       }
       last_valid = valid_loss;
+      // Open the output model
+      if(best_valid < valid_loss && model_out_file != "") {
+        ofstream out(model_out_file.c_str());
+        if(!out) THROW_ERROR("Could not open output file: " << model_out_file);
+        boost::archive::text_oarchive oa(out);
+        oa << mod;
+        best_valid = valid_loss;
+      }
     }
     for(size_t i = 0; i < test_inst.size(); i++) {
       ostringstream oss;
