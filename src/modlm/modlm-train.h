@@ -44,13 +44,12 @@ public:
   
 protected:
 
-  std::pair<int,int> create_instances(const std::vector<DistPtr> & dists, int max_ctxt, bool hold_out, bool penalize_unk, const DictPtr dict, const std::string & file_name, TrainingData & data);
+  std::pair<int,int> create_instances(const std::vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const std::string & file_name, TrainingData & data);
+  float calc_instance(const TrainingData & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch, TrainerPtr & trainer, cnn::Model & mod);
 
   // Variable settings
   int epochs_;
   std::string model_in_file_, model_out_file_;
-  std::string train_file_;
-  std::vector<std::string> test_files_;
 
   cnn::LookupParameters* reps_;
   std::vector<cnn::Parameters*> Ws_;
@@ -58,9 +57,12 @@ protected:
   cnn::Parameters* V_;
   cnn::Parameters* a_;
 
+  float log_unk_prob_;
   int num_ctxt_, num_dense_dist_, num_sparse_dist_;
   int word_hist_, word_rep_;
-  bool use_context_;
+  int max_minibatch_;
+  int dev_epochs_, online_epochs_;
+  bool use_context_, penalize_unk_;
   
 
 };
