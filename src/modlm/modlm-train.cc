@@ -102,8 +102,9 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
   Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, wdists);
   Expression counts = input(cg, {(unsigned int)num_words}, wcnts);
 
-  // cerr << "wcnts: " << print_vec(wcnts) << endl;
+  // cerr << "wcnts:  " << print_vec(wcnts) << endl;
   // cerr << "wdists: " << print_vec(wdists) << endl;
+  // cerr << "wctxt:  " << print_vec(inst.first.first) << endl;
 
   // If not using context, it's really simple
   if(!use_context_) {
@@ -181,9 +182,9 @@ pair<int,int> ModlmTrain::create_instances(const vector<DistPtr> & dists, int ma
       calc_all_contexts(dists, cnts.first, -1, ctxt);
     // Prepare the pointers for each word
     Sentence wids, wcnts;
-    vector<float*> ptrs(cnts.second->second.size());
-    vector<TrainingTarget> trgs(cnts.second->second.size(), TrainingTarget(vector<float>(num_dense_dist_), vector<pair<int,float> >()));
-    for(auto & kv : cnts.second->second) {
+    vector<float*> ptrs(cnts.second->cnts.size());
+    vector<TrainingTarget> trgs(cnts.second->cnts.size(), TrainingTarget(vector<float>(num_dense_dist_), vector<pair<int,float> >()));
+    for(auto & kv : cnts.second->cnts) {
       wids.push_back(kv.first);
       wcnts.push_back(kv.second);
       total_words.first += kv.second;

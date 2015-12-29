@@ -6,35 +6,83 @@
 #include <modlm/dict-utils.h>
 
 using namespace modlm;
+using namespace std;
 
 void Counts::add_count(const Sentence & idx, WordId wid, WordId last_fallback) {
   for(auto id : idx)
     if(id == -1) THROW_ERROR("Illegal context");
   ContextCountsPtr & my_cnts = cnts_[idx];
   if(my_cnts.get() == NULL) my_cnts.reset(new ContextCounts);
-  my_cnts->first++;
-  my_cnts->second[wid]++;
+  my_cnts->full_sum++;
+  my_cnts->cnts[wid]++;
 }
 
-// Calculate the ctxtual features 
+// Calculate 4 contextual features (1-3 are logs)
+// 1) The total sum of all counts for this context
+// 2) The number of unique following words in this context
+// 3) The sum of 1 and 2
+// 4) A binary feature indicating unseen contexts
 void Counts::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * fl) {
   auto it = cnts_.find(ctxt);
-  // Unknown
-  fl[2] = 0;
-  if(it == cnts_.end() || (held_out_wid != -1 && it->second->first == mod_cnt(1))) {
+  if(it == cnts_.end() || (held_out_wid != -1 && it->second->full_sum == 1)) {
     fl[0] = 0.0;
     fl[1] = 0.0;
-    fl[2] = 1.0;
+    fl[2] = 0.0;
+    fl[3] = 1.0;
   } else {
     assert(it->second.get() != NULL);
-    if(held_out_wid == -1) {
-      fl[0] = log(it->second->first);
-      fl[1] = log(mod_cnt(it->second->second.size()));
-    } else {
-      int cnt = it->second->second[held_out_wid];
-      fl[0] = log(it->second->first - mod_cnt(cnt) + mod_cnt(cnt-1));
-      fl[1] = log(it->second->second.size() - (it->second->second[held_out_wid] == mod_cnt(1) ? 1 : 0));
+    float full_sum = it->second->full_sum;
+    float uniq = it->second->cnts.size();
+    if(held_out_wid != -1) {
+      full_sum--;
+      uniq -= (it->second->cnts[held_out_wid] == 1 ? 1 : 0);
     }
+    fl[0] = log(full_sum);
+    fl[1] = log(uniq);
+    fl[2] = log(full_sum + uniq);
+    fl[3] = 0.0;
+  }
+}
+
+// Calculate 6 contextual features (1-3 and 5-6 are logs)
+// 1) The total sum of all counts for this context
+// 2) The number of unique following words in this context
+// 3) The sum of 1 and 2
+// 4) A binary feature indicating unseen contexts
+// 5) The discounted sum of all counts for this context
+// 6) The difference between the total sum and discounted sum
+void CountsMabs::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * fl) {
+  auto it = cnts_.find(ctxt);
+  if(it == cnts_.end() || (held_out_wid != -1 && it->second->full_sum == 1)) {
+    fl[0] = 0.0;
+    fl[1] = 0.0;
+    fl[2] = 0.0;
+    fl[3] = 0.0;
+    fl[4] = 0.0;
+    fl[5] = 1.0;
+    // fl[0] = 0.0;
+    // fl[1] = 0.0;
+    // fl[2] = 1.0;
+  } else {
+    assert(it->second.get() != NULL);
+    float full_sum = it->second->full_sum;
+    float uniq = it->second->cnts.size();
+    float disc_sum = ((ContextCountsDisc*)it->second.get())->disc_sum;
+    if(held_out_wid != -1) {
+      full_sum -= 1;
+      uniq -= (it->second->cnts[held_out_wid] == 1 ? 1 : 0);
+      int my_cnt = it->second->cnts[held_out_wid];
+      disc_sum = disc_sum - mod_cnt(my_cnt) + mod_cnt(my_cnt-1);
+    }
+    fl[0] = log(full_sum);
+    fl[1] = log(uniq);
+    fl[2] = log(full_sum + uniq);
+    fl[3] = log(disc_sum);
+    fl[4] = log(full_sum-disc_sum);
+    fl[5] = 0.0;
+    // fl[0] = log(disc_sum);
+    // fl[1] = log(uniq);
+    // fl[2] = 0.0;
   }
 }
 
@@ -53,15 +101,15 @@ void Counts::calc_word_dists(const Sentence & ctxt,
   } else {
     for(size_t i = 0; i < wids.size(); i++) {
       auto wid = wids[i];
-      auto it2 = it->second->second.find(wid);
-      if(it2 == it->second->second.end()) {
+      auto it2 = it->second->cnts.find(wid);
+      if(it2 == it->second->cnts.end()) {
         trgs[i].first[dense_offset] = 0.0;
       } else if(leave_one_out) {
         float act = mod_cnt(it2->second), disc = mod_cnt(it2->second-1);
-        float denom = (it->second->first - act + disc);
+        float denom = (it->second->get_denominator() - act + disc);
         trgs[i].first[dense_offset] = denom == 0.0 ? 0.0 : disc / denom;
       } else {
-        trgs[i].first[dense_offset] = mod_cnt(it2->second) / it->second->first;
+        trgs[i].first[dense_offset] = mod_cnt(it2->second) / it->second->get_denominator();
       }
       if(wids[i] == 0) trgs[i].first[dense_offset] *= unk_prob;
     }
@@ -74,7 +122,7 @@ void Counts::write(DictPtr dict, std::ostream & out) const {
     out << PrintSentence(cnt.first, dict) << '\t';
     std::string prev = "";
     assert(cnt.second.get() != NULL);
-    for(const auto & kv : cnt.second->second) {
+    for(const auto & kv : cnt.second->cnts) {
       out << prev << dict->Convert(kv.first) << ' ' << kv.second; 
       prev = " ";
     }
@@ -92,13 +140,12 @@ void Counts::read(DictPtr dict, std::istream & in) {
     assert(strs.size() == 2);
     ContextCountsPtr & ptr = cnts_[ParseSentence(strs[0], dict, false)];
     assert(ptr.get() == NULL);
-    ptr.reset(new ContextCounts);
+    ptr.reset(new_counts_ptr());
     boost::split(words, strs[1], boost::is_any_of(" "));
     assert(words.size() % 2 == 0);
     for(size_t i = 0; i < words.size(); i += 2) {
       int cnt = stoi(words[i+1]);
-      ptr->first += mod_cnt(cnt);
-      ptr->second[dict->Convert(words[i])] = cnt;
+      ptr->add_word(dict->Convert(words[i]), cnt, mod_cnt(cnt));
     }
   }
 }
@@ -107,16 +154,19 @@ void CountsMabs::finalize_count() {
   discounts_.resize(4);
   std::vector<int> fofs(5);
   for(auto & kv : cnts_)
-    for(auto & cnt : kv.second->second)
+    for(auto & cnt : kv.second->cnts)
       if(cnt.second < fofs.size())
         fofs[cnt.second]++;
   float Y = fofs[1] / float(fofs[1] + 2*fofs[2]);
   discounts_[1] = 1 - 2.0*Y*fofs[2]/fofs[1];
   discounts_[2] = 2 - 3.0*Y*fofs[3]/fofs[2];
   discounts_[3] = 3 - 4.0*Y*fofs[4]/fofs[3];
-  for(auto & kv : cnts_)
-    for(auto & cnt : kv.second->second)
-      kv.second->first -= (cnt.second - mod_cnt(cnt.second));
+  for(auto & kv : cnts_) {
+    ContextCountsDisc* count = (ContextCountsDisc*)kv.second.get();
+    count->disc_sum = count->full_sum;
+    for(auto & cnt : count->cnts)
+      count->disc_sum -= (cnt.second - mod_cnt(cnt.second));
+  }
 }
 
 float CountsMabs::mod_cnt(int cnt) const {
@@ -159,7 +209,7 @@ void CountsMkn::finalize_count() {
     kv.reset(new ContextCounts);
     assert(kv_uniq.second != NULL);
     for(auto & cnt : kv_uniq.second->second)
-      kv->second[cnt.first] = cnt.second.size();
+      kv->cnts[cnt.first] = cnt.second.size();
   }
   cnts_uniq_.clear();
   CountsMabs::finalize_count();

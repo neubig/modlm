@@ -81,7 +81,9 @@ void DistNgram::finalize_stats() {
 
 // Get the number of ctxtual features we can expect from this model
 size_t DistNgram::get_ctxt_size() const {
-  return counts_.size()*3; 
+  size_t ret = 0;
+  for(auto & count : counts_) ret += count->get_ctxt_size();
+  return ret;
 }
 
 Sentence DistNgram::calc_ctxt(const Sentence & in, int pos, const Sentence & ctxid) {
@@ -94,12 +96,11 @@ Sentence DistNgram::calc_ctxt(const Sentence & in, int pos, const Sentence & ctx
 // And calculate these features
 void DistNgram::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float* feats_out) const {
   Sentence this_ctxt;
-  for(size_t i : ctxt_pos_)
-    this_ctxt.push_back(ctxt[i-1]);
-  for(size_t j = counts_.size()-1; ; j--) {
-    (*counts_[j]).calc_ctxt_feats(this_ctxt, held_out_wid, feats_out + 3 * j);
-    if(this_ctxt.size() == 0) break;
-    this_ctxt.resize(this_ctxt.size()-1);
+  for(size_t j = 0; ; j++) {
+    (*counts_[j]).calc_ctxt_feats(this_ctxt, held_out_wid, feats_out);
+    feats_out += counts_[j]->get_ctxt_size();
+    if(j >= ctxt.size()) break;
+    this_ctxt.push_back(ctxt[j]);
   }
 }
 
