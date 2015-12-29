@@ -85,18 +85,16 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
   int num_dist = num_dense_dist_ + num_sparse_dist_;
   int num_words = (range.second - range.first);
   vector<float> wdists(num_words * num_dist, 0.0), wcnts(num_words);
-  size_t pos = 0, ptr = 0;
-  for(auto & kv : inst.second) {
-    if(pos >= range.first && pos < range.second) {
-      memcpy(&wdists[ptr], &kv.first.first[0], sizeof(float)*num_dense_dist_);
-      ptr += num_dense_dist_;
-      for(auto & elem : kv.first.second)
-        wdists[ptr + elem.first] = elem.second;
-      ptr += num_sparse_dist_;
-      wcnts[pos-range.first] = kv.second;
-      words.first += kv.second;
-    }
-    pos++;
+  size_t ptr = 0;
+  for(size_t pos = range.first; pos < range.second; pos++) {
+    auto & kv = inst.second[pos];
+    memcpy(&wdists[ptr], &kv.first.first[0], sizeof(float)*num_dense_dist_);
+    ptr += num_dense_dist_;
+    for(auto & elem : kv.first.second)
+      wdists[ptr + elem.first] = elem.second;
+    ptr += num_sparse_dist_;
+    wcnts[pos-range.first] = kv.second;
+    words.first += kv.second;
   }
   // Load the targets
   Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, wdists);
@@ -138,15 +136,31 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
 }
 
 inline void calc_all_contexts(const vector<DistPtr> & dists, const Sentence & sent, int hold_out, TrainingContext & ctxt) {
-   int curr_ctxt = 0;
-   for(auto dist : dists) {
-     assert(dist.get() != NULL);
-     dist->calc_ctxt_feats(sent, -1, &ctxt.first[curr_ctxt]);
-     curr_ctxt += dist->get_ctxt_size();
-   }
+ int curr_ctxt = 0;
+ for(auto dist : dists) {
+   assert(dist.get() != NULL);
+   dist->calc_ctxt_feats(sent, -1, &ctxt.first[curr_ctxt]);
+   curr_ctxt += dist->get_ctxt_size();
+ }
 }
 
-pair<int,int> ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const string & file_name, TrainingData & data) {
+
+void ModlmTrain::convert_data(const TrainingDataMap & data_map, TrainingData & data) {
+  data.resize(data_map.size());
+  auto outer_it = data.begin();
+  for(auto & dm : data_map) {
+    outer_it->first = dm.first;
+    outer_it->second.resize(dm.second.size());
+    auto inner_it = outer_it->second.begin();
+    for(auto & dmin : dm.second) {
+      *inner_it = dmin;
+      inner_it++;
+    }
+    outer_it++;
+  }
+}
+
+pair<int,int> ModlmTrain::create_data(const vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const string & file_name, TrainingDataMap & data) {
 
   float uniform_prob = 1.0/dict->size();
   float unk_prob = (penalize_unk_ ? uniform_prob : 1);
@@ -338,10 +352,17 @@ int ModlmTrain::main(int argc, char** argv) {
   pair<int,int> train_words(0,0), valid_words(0,0);
   vector<TrainingData> test_inst(test_files.size());
   vector<pair<int,int> > test_words(test_files.size(), pair<int,int>(0,0));
-  if(valid_file != "")
-    valid_words = create_instances(dists, max_ctxt, false, dict, valid_file, valid_inst);
-  for(size_t i = 0; i < test_files.size(); i++)
-    test_words[i]  = create_instances(dists, max_ctxt, false, dict, test_files[i], test_inst[i]);
+  TrainingDataMap data_map;
+  if(valid_file != "") {
+    valid_words = create_data(dists, max_ctxt, false, dict, valid_file, data_map);
+    convert_data(data_map, valid_inst);
+    data_map.clear();
+  }
+  for(size_t i = 0; i < test_files.size(); i++) {
+    test_words[i]  = create_data(dists, max_ctxt, false, dict, test_files[i], data_map);
+    convert_data(data_map, test_inst[i]);
+    data_map.clear();
+  }
 
   // Create the training instances
   for(size_t i = 0; i < train_files.size(); i++) {
@@ -349,9 +370,10 @@ int ModlmTrain::main(int argc, char** argv) {
       if(model_locs[j].size() != 1)
         dists[j] = DistFactory::from_file(model_locs[j][i+1], dict);
     }
-    pair<int,int> my_words = create_instances(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_files[i], train_inst);
+    pair<int,int> my_words = create_data(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_files[i], data_map);
     train_words.first += my_words.first; train_words.second += my_words.second;
   }
+  convert_data(data_map, train_inst);
   dists.clear();
 
   // Initialize
