@@ -27,8 +27,7 @@ void Counts::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float *
   if(it == cnts_.end() || (held_out_wid != -1 && it->second->full_sum == 1)) {
     fl[0] = 0.0;
     fl[1] = 0.0;
-    fl[2] = 0.0;
-    fl[3] = 1.0;
+    fl[2] = 1.0;
   } else {
     assert(it->second.get() != NULL);
     float full_sum = it->second->full_sum;
@@ -39,8 +38,7 @@ void Counts::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float *
     }
     fl[0] = log(full_sum);
     fl[1] = log(uniq);
-    fl[2] = log(full_sum + uniq);
-    fl[3] = 0.0;
+    fl[2] = 0.0;
   }
 }
 
@@ -57,12 +55,7 @@ void CountsMabs::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, flo
     fl[0] = 0.0;
     fl[1] = 0.0;
     fl[2] = 0.0;
-    fl[3] = 0.0;
-    fl[4] = 0.0;
-    fl[5] = 1.0;
-    // fl[0] = 0.0;
-    // fl[1] = 0.0;
-    // fl[2] = 1.0;
+    fl[3] = 1.0;
   } else {
     assert(it->second.get() != NULL);
     float full_sum = it->second->full_sum;
@@ -76,13 +69,8 @@ void CountsMabs::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, flo
     }
     fl[0] = log(full_sum);
     fl[1] = log(uniq);
-    fl[2] = log(full_sum + uniq);
-    fl[3] = log(disc_sum);
-    fl[4] = log(full_sum-disc_sum);
-    fl[5] = 0.0;
-    // fl[0] = log(disc_sum);
-    // fl[1] = log(uniq);
-    // fl[2] = 0.0;
+    fl[2] = log(disc_sum);
+    fl[3] = 0.0;
   }
 }
 

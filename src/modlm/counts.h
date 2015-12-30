@@ -43,7 +43,7 @@ public:
 
   // Calculate the ctxtual features 
   virtual void calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * fl);
-  virtual size_t get_ctxt_size() { return 4; }
+  virtual size_t get_ctxt_size() { return 3; }
 
   // Calculate the ctxtual features 
   virtual void calc_word_dists(const Sentence & ctxt,
@@ -85,8 +85,7 @@ public:
   virtual ContextCounts* new_counts_ptr() const override { return new ContextCountsDisc; }
   
   virtual void calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * fl) override;
-  virtual size_t get_ctxt_size() override { return 6; }
-  // virtual size_t get_ctxt_size() override { return 3; }
+  virtual size_t get_ctxt_size() override { return 4; }
   
   virtual void write(DictPtr dict, std::ostream & out) const override;
 

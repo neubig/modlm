@@ -17,6 +17,7 @@
 #include <modlm/dist-factory.h>
 #include <modlm/dict-utils.h>
 #include <modlm/whitener.h>
+#include <modlm/heuristic.h>
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/archive/text_oarchive.hpp>
 
@@ -108,6 +109,14 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
   // If not using context, it's really simple
   if(!use_context_) {
     Expression nlprob = -log(transpose(probs) * softmax( parameter(cg, a_) ) );
+    Expression nll = transpose(counts) * nlprob;
+    return nll;
+  }
+
+  // If using heuristics, then perform heuristic smoothing
+  if(heuristic_.get() != NULL) {
+    vector<float> interp = heuristic_->smooth(num_dense_dist_, inst.first.first);
+    Expression nlprob = -log( transpose(probs) * input(cg, {(unsigned int)num_dist}, interp) );
     Expression nll = transpose(counts) * nlprob;
     return nll;
   }
@@ -264,6 +273,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
       ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
+      ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
@@ -297,6 +307,10 @@ int ModlmTrain::main(int argc, char** argv) {
     delete cnn::rndeng;
     cnn::rndeng = new mt19937(seed);
   }
+
+  // Create a heuristic if using one
+  if(vm_["heuristic"].as<string>() != "")
+    heuristic_ = HeuristicFactory::create_heuristic(vm_["heuristic"].as<string>());
 
   // Get files:
   vector<string> train_files, wildcards, test_files;

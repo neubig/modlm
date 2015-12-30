@@ -96,11 +96,12 @@ Sentence DistNgram::calc_ctxt(const Sentence & in, int pos, const Sentence & ctx
 // And calculate these features
 void DistNgram::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float* feats_out) const {
   Sentence this_ctxt;
+  int offset = 0;
   for(size_t j = 0; ; j++) {
-    (*counts_[j]).calc_ctxt_feats(this_ctxt, held_out_wid, feats_out);
-    feats_out += counts_[j]->get_ctxt_size();
-    if(j >= ctxt.size()) break;
-    this_ctxt.push_back(ctxt[j]);
+    (*counts_[j]).calc_ctxt_feats(this_ctxt, held_out_wid, feats_out + offset);
+    offset += counts_[j]->get_ctxt_size();
+    if(j >= ctxt_pos_.size()) break;
+    this_ctxt.push_back(ctxt[ctxt_pos_[j]-1]);
   }
 }
 

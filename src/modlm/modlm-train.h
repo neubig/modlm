@@ -21,6 +21,8 @@ namespace cnn {
 
 namespace modlm {
 
+class Heuristic;
+typedef std::shared_ptr<Heuristic> HeuristicPtr;
 class DistBase;
 typedef std::shared_ptr<DistBase> DistPtr;
 typedef std::shared_ptr<cnn::Dict> DictPtr;
@@ -52,6 +54,8 @@ protected:
   // Variable settings
   int epochs_;
   std::string model_in_file_, model_out_file_;
+
+  HeuristicPtr heuristic_;
 
   cnn::LookupParameters* reps_;
   std::vector<cnn::Parameters*> Ws_;
