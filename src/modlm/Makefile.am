@@ -5,6 +5,7 @@ LIBCPP = \
   dist-train.cc \
   dist-ngram.cc \
   counts.cc \
+  whitener.cc \
   dict-utils.cc \
   dist-factory.cc \
   dist-one-hot.cc \

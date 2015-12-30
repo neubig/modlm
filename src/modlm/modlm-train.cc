@@ -16,6 +16,7 @@
 #include <modlm/dist-ngram.h>
 #include <modlm/dist-factory.h>
 #include <modlm/dict-utils.h>
+#include <modlm/whitener.h>
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/archive/text_oarchive.hpp>
 
@@ -261,6 +262,8 @@ int ModlmTrain::main(int argc, char** argv) {
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
+      ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
+      ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
@@ -375,6 +378,14 @@ int ModlmTrain::main(int argc, char** argv) {
   }
   convert_data(data_map, train_inst);
   dists.clear();
+
+  // Whiten the data if necessary
+  Whitener whitener(vm_["whiten"].as<string>(), vm_["whiten_eps"].as<float>());
+  whitener.calc_matrix(train_inst);
+  whitener.whiten(train_inst);
+  whitener.whiten(valid_inst);
+  for(auto & my_inst : test_inst)
+    whitener.whiten(my_inst);
 
   // Initialize
   cnn::Model mod;
