@@ -303,7 +303,7 @@ int ModlmTrain::main(int argc, char** argv) {
     THROW_ERROR("Must specify a vocabulary file");
   ifstream vocab_in(vocab_file);
   if(!(getline(vocab_in, line) && line == "<unk>" && getline(vocab_in, line) && line == "<s>"))
-    THROW_ERROR("First two lines of a vocabulary file must be <unk> and <s>");
+    THROW_ERROR("First two lines of a vocabulary file must be <unk> and <s>: " << vocab_file);
   while(getline(vocab_in, line))
     dict->Convert(line);
   dict->Freeze();
