@@ -12,7 +12,7 @@ void Counts::add_count(const Sentence & idx, WordId wid, WordId last_fallback) {
   for(auto id : idx)
     if(id == -1) THROW_ERROR("Illegal context");
   ContextCountsPtr & my_cnts = cnts_[idx];
-  if(my_cnts.get() == NULL) my_cnts.reset(new ContextCounts);
+  if(my_cnts.get() == NULL) my_cnts.reset(new_counts_ptr());
   my_cnts->full_sum++;
   my_cnts->cnts[wid]++;
 }
