@@ -108,6 +108,7 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
 
   // If not using context, it's really simple
   if(!use_context_) {
+    if(dropout_prob_ > 0) THROW_ERROR("dropout not implemented for no context");
     Expression nlprob = -log(transpose(probs) * softmax( parameter(cg, a_) ) );
     Expression nll = transpose(counts) * nlprob;
     return nll;
@@ -129,17 +130,22 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
     vector<Expression> expr_cat;
     if(inst.first.first.size() != 0)
       expr_cat.push_back(h);
-    // cerr << "wreps:";
-    for(size_t i = 0; i < inst.first.second.size(); i++) {
+    for(size_t i = 0; i < inst.first.second.size(); i++)
       expr_cat.push_back(lookup(cg, reps_, inst.first.second[i]));
-      // cerr << " " << inst.first.second[i];
-    }
-    // cerr << endl;
     h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
   }
   for(size_t i = 0; i < Ws_.size(); i++)
     h = tanh( parameter(cg, Ws_[i]) * h + parameter(cg, bs_[i]) );
-  Expression interp = softmax( parameter(cg, V_) * h + parameter(cg, a_) );
+  Expression softmax_input = parameter(cg, V_) * h + parameter(cg, a_);
+  Expression interp; 
+  uniform_real_distribution<float> float_distribution(0.0, 1.0);  
+  if(dropout_prob_ == 0 || float_distribution(*cnn::rndeng) >= dropout_prob_) {
+    interp = softmax( softmax_input );
+  } else {
+    assert(dropout_spans_.size() > 0);
+    uniform_int_distribution<int> int_distribution(0, (int)dropout_spans_.size()-1);  
+    interp = exp( log_softmax( softmax_input, dropout_spans_[int_distribution(*cnn::rndeng)] ) );
+  }
   Expression nlprob = -log(transpose(probs) * interp);
   Expression nll = transpose(counts) * nlprob;
   return nll;
@@ -273,6 +279,9 @@ int ModlmTrain::main(int argc, char** argv) {
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
       ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
+      ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints)")
+      ("dropout_prob", po::value<float>()->default_value(0.0), "Starting dropout probability")
+      ("dropout_prob_decay", po::value<float>()->default_value(0.0), "Dropout probability decay")
       ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
@@ -308,6 +317,8 @@ int ModlmTrain::main(int argc, char** argv) {
   clipping_enabled_ = vm_["clipping_enabled"].as<bool>();
   float rate_decay = vm_["rate_decay"].as<float>();
   string model_out_file = vm_["model_out"].as<string>();
+  dropout_prob_ = vm_["dropout_prob"].as<float>();
+  dropout_prob_decay_ = vm_["dropout_prob_decay"].as<float>();
 
   // Create a heuristic if using one
   if(vm_["heuristic"].as<string>() != "")
@@ -316,9 +327,11 @@ int ModlmTrain::main(int argc, char** argv) {
   // Calculate the number of layers
   boost::split(strs, vm_["layers"].as<string>(), boost::is_any_of(" "));
   vector<int> hidden_size;
-  for(auto str : strs)
-    if(str != "")
-      hidden_size.push_back(stoi(str));
+  for(auto str : strs) if(str != "") hidden_size.push_back(stoi(str));
+  boost::split(strs, vm_["dropout_models"].as<string>(), boost::is_any_of(" "));
+  vector<int> dropout_models;
+  for(auto str : strs) if(str != "") dropout_models.push_back(stoi(str));
+  dropout_spans_.resize(dropout_models.size());
 
   // Get files:
   vector<string> train_files, wildcards, test_files;
@@ -362,6 +375,7 @@ int ModlmTrain::main(int argc, char** argv) {
   // Read in the the testing distributions
   vector<DistPtr> dists;
   size_t max_ctxt = word_hist_;
+  size_t mod_id = 0;
   for(auto & locs : model_locs) {
     cout << "Started reading model " << locs[0] << " (s=" << time.Elapsed() << ")" << endl;
     DistPtr dist = DistFactory::from_file(locs[0], dict);
@@ -370,8 +384,26 @@ int ModlmTrain::main(int argc, char** argv) {
     num_dense_dist_ += dist->get_dense_size();
     num_sparse_dist_ += dist->get_sparse_size();
     num_ctxt_ += dist->get_ctxt_size();
+    mod_id++;
   }
   cout << "Finished reading models (s=" << time.Elapsed() << ")" << endl;
+
+  // Find the spans for dropout if necessary
+  if(dropout_spans_.size() != 0) {
+    size_t curr_dense = 0, curr_sparse = 0, dense_end = 0, sparse_end = 0;
+    for(size_t did = 0; did < dists.size(); did++, curr_dense = dense_end, curr_sparse = sparse_end) {
+      dense_end += dists[did]->get_dense_size();
+      sparse_end += dists[did]->get_sparse_size();
+      for(size_t i = 0; i < dropout_spans_.size(); i++) {
+        if(mod_id != dropout_models[i]) {
+          for(size_t j = curr_dense; j < dense_end; j++)
+            dropout_spans_[i].push_back(j);
+          for(size_t j = curr_sparse; j < sparse_end; j++)
+            dropout_spans_[i].push_back(j+num_dense_dist_);
+        }
+      }
+    }
+  }
 
   // Create the testing/validation instances
   TrainingData train_inst, valid_inst;
@@ -473,6 +505,7 @@ int ModlmTrain::main(int argc, char** argv) {
       trainer = get_trainer(trainer_, learning_rate_, mod);
       trainer->clipping_enabled = clipping_enabled_;
     }
+    dropout_prob_ *= dropout_prob_decay_;
   }
 
   cout << "Done training! (s=" << time.Elapsed() << ")" << endl;

@@ -72,6 +72,8 @@ protected:
   std::string trainer_;
   float learning_rate_;
   bool clipping_enabled_;
+  float dropout_prob_, dropout_prob_decay_;
+  std::vector<std::vector<unsigned> > dropout_spans_;
 
 };
 
