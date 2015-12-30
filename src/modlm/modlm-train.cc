@@ -267,7 +267,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
       ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
       ("wildcards", po::value<string>()->default_value(""), "Wildcards in model/data names for cross validation")
-      ("seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
+      ("cnn_seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
@@ -286,6 +286,14 @@ int ModlmTrain::main(int argc, char** argv) {
       return 1;
   }
 
+  // Create the timer
+  Timer time;
+  cerr << "Started training! (s=" << time.Elapsed() << ")" << endl;
+
+  // Temporary buffers
+  string line;
+  vector<string> strs;
+
   // Save various settings
   GlobalVars::verbose = vm_["verbose"].as<int>();
   word_hist_ = vm_["word_hist"].as<int>();
@@ -301,16 +309,16 @@ int ModlmTrain::main(int argc, char** argv) {
   float rate_decay = vm_["rate_decay"].as<float>();
   string model_out_file = vm_["model_out"].as<string>();
 
-  // Set random seed if necessary
-  int seed = vm_["seed"].as<int>();
-  if(seed != 0) {
-    delete cnn::rndeng;
-    cnn::rndeng = new mt19937(seed);
-  }
-
   // Create a heuristic if using one
   if(vm_["heuristic"].as<string>() != "")
     heuristic_ = HeuristicFactory::create_heuristic(vm_["heuristic"].as<string>());
+
+  // Calculate the number of layers
+  boost::split(strs, vm_["layers"].as<string>(), boost::is_any_of(" "));
+  vector<int> hidden_size;
+  for(auto str : strs)
+    if(str != "")
+      hidden_size.push_back(stoi(str));
 
   // Get files:
   vector<string> train_files, wildcards, test_files;
@@ -322,9 +330,7 @@ int ModlmTrain::main(int argc, char** argv) {
   boost::split(test_files, vm_["test_file"].as<string>(), boost::is_any_of("|"));
   if(test_files.size() < 1 || test_files[0] == "") THROW_ERROR("Must specify at least one --test_file");
 
-  // Temporary buffers
-  string line;
-  vector<string> strs;
+  cerr << "Reading vocabulary... (s=" << time.Elapsed() << ")" << endl;
 
   // Read in the vocabulary if necessary
   DictPtr dict(new cnn::Dict);
@@ -352,10 +358,12 @@ int ModlmTrain::main(int argc, char** argv) {
       THROW_ERROR("When using cross-validation on the training data, must have appropriate model size.");
     model_locs.push_back(my_locs);
   }
+
   // Read in the the testing distributions
   vector<DistPtr> dists;
   size_t max_ctxt = word_hist_;
   for(auto & locs : model_locs) {
+    cerr << "Started reading model " << locs[0] << " (s=" << time.Elapsed() << ")" << endl;
     DistPtr dist = DistFactory::from_file(locs[0], dict);
     dists.push_back(dist);
     max_ctxt = max(dist->get_ctxt_len(), max_ctxt);
@@ -363,6 +371,7 @@ int ModlmTrain::main(int argc, char** argv) {
     num_sparse_dist_ += dist->get_sparse_size();
     num_ctxt_ += dist->get_ctxt_size();
   }
+  cerr << "Finished reading models (s=" << time.Elapsed() << ")" << endl;
 
   // Create the testing/validation instances
   TrainingData train_inst, valid_inst;
@@ -371,11 +380,13 @@ int ModlmTrain::main(int argc, char** argv) {
   vector<pair<int,int> > test_words(test_files.size(), pair<int,int>(0,0));
   TrainingDataMap data_map;
   if(valid_file != "") {
+    cerr << "Creating data for " << valid_file << " (s=" << time.Elapsed() << ")" << endl;
     valid_words = create_data(dists, max_ctxt, false, dict, valid_file, data_map);
     convert_data(data_map, valid_inst);
     data_map.clear();
   }
   for(size_t i = 0; i < test_files.size(); i++) {
+    cerr << "Creating data for " << test_files[i] << " (s=" << time.Elapsed() << ")" << endl;
     test_words[i]  = create_data(dists, max_ctxt, false, dict, test_files[i], data_map);
     convert_data(data_map, test_inst[i]);
     data_map.clear();
@@ -384,14 +395,18 @@ int ModlmTrain::main(int argc, char** argv) {
   // Create the training instances
   for(size_t i = 0; i < train_files.size(); i++) {
     for(size_t j = 0; j < model_locs.size(); j++) {
-      if(model_locs[j].size() != 1)
+      if(model_locs[j].size() != 1) {
+        cerr << "Started reading model " << model_locs[j][i+1] << " (s=" << time.Elapsed() << ")" << endl;
         dists[j] = DistFactory::from_file(model_locs[j][i+1], dict);
+      }
     }
+    cerr << "Creating data for " << train_files[i] << " (s=" << time.Elapsed() << ")" << endl;
     pair<int,int> my_words = create_data(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_files[i], data_map);
     train_words.first += my_words.first; train_words.second += my_words.second;
   }
   convert_data(data_map, train_inst);
   dists.clear();
+  cerr << "Done creating data. Whitening... (s=" << time.Elapsed() << ")" << endl;
 
   // Whiten the data if necessary
   Whitener whitener(vm_["whiten"].as<string>(), vm_["whiten_eps"].as<float>());
@@ -401,6 +416,9 @@ int ModlmTrain::main(int argc, char** argv) {
   for(auto & my_inst : test_inst)
     whitener.whiten(my_inst);
 
+
+  cerr << "Creating model (s=" << time.Elapsed() << ")" << endl;
+
   // Initialize
   cnn::Model mod;
   TrainerPtr trainer = get_trainer(trainer_, learning_rate_, mod);
@@ -408,12 +426,6 @@ int ModlmTrain::main(int argc, char** argv) {
 
   float uniform_prob = 1.0/dict->size();
   log_unk_prob_ = vm_["penalize_unk"].as<bool>() ? log(uniform_prob) : 0;
-
-  boost::split(strs, vm_["layers"].as<string>(), boost::is_any_of(" "));
-  vector<int> hidden_size;
-  for(auto str : strs)
-    if(str != "")
-      hidden_size.push_back(stoi(str));
 
   int num_dist = num_sparse_dist_ + num_dense_dist_;
   if(use_context_) {
@@ -434,9 +446,10 @@ int ModlmTrain::main(int argc, char** argv) {
   // Train a neural network to predict the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; epoch++) { 
-    calc_instance(train_inst, "-- trn ", train_words, true, epoch, trainer, mod);
+    cout << "--- Starting epoch " << epoch << " (s=" << time.Elapsed() << ")" << endl;
+    calc_instance(train_inst, "trn ", train_words, true, epoch, trainer, mod);
     if(valid_inst.size() != 0) {
-      float valid_loss = calc_instance(valid_inst, "   vld ", valid_words, false, epoch, trainer, mod);
+      float valid_loss = calc_instance(valid_inst, "vld ", valid_words, false, epoch, trainer, mod);
       if(rate_decay != 1.0 && last_valid < valid_loss) {
         trainer->eta0 *= rate_decay;
         cout << "*** Reduced learning rate to " << trainer->eta0 << endl;
@@ -453,7 +466,7 @@ int ModlmTrain::main(int argc, char** argv) {
     }
     for(size_t i = 0; i < test_inst.size(); i++) {
       ostringstream oss;
-      calc_instance(test_inst[i], "   tst" + to_string(i), test_words[i], false, epoch, trainer, mod);
+      calc_instance(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch, trainer, mod);
     }
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
@@ -461,6 +474,8 @@ int ModlmTrain::main(int argc, char** argv) {
       trainer->clipping_enabled = clipping_enabled_;
     }
   }
+
+  cout << "Done training! (s=" << time.Elapsed() << ")" << endl;
 
   return 0;
 }
