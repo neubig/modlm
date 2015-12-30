@@ -288,7 +288,7 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Create the timer
   Timer time;
-  cerr << "Started training! (s=" << time.Elapsed() << ")" << endl;
+  cout << "Started training! (s=" << time.Elapsed() << ")" << endl;
 
   // Temporary buffers
   string line;
@@ -330,7 +330,7 @@ int ModlmTrain::main(int argc, char** argv) {
   boost::split(test_files, vm_["test_file"].as<string>(), boost::is_any_of("|"));
   if(test_files.size() < 1 || test_files[0] == "") THROW_ERROR("Must specify at least one --test_file");
 
-  cerr << "Reading vocabulary... (s=" << time.Elapsed() << ")" << endl;
+  cout << "Reading vocabulary... (s=" << time.Elapsed() << ")" << endl;
 
   // Read in the vocabulary if necessary
   DictPtr dict(new cnn::Dict);
@@ -363,7 +363,7 @@ int ModlmTrain::main(int argc, char** argv) {
   vector<DistPtr> dists;
   size_t max_ctxt = word_hist_;
   for(auto & locs : model_locs) {
-    cerr << "Started reading model " << locs[0] << " (s=" << time.Elapsed() << ")" << endl;
+    cout << "Started reading model " << locs[0] << " (s=" << time.Elapsed() << ")" << endl;
     DistPtr dist = DistFactory::from_file(locs[0], dict);
     dists.push_back(dist);
     max_ctxt = max(dist->get_ctxt_len(), max_ctxt);
@@ -371,7 +371,7 @@ int ModlmTrain::main(int argc, char** argv) {
     num_sparse_dist_ += dist->get_sparse_size();
     num_ctxt_ += dist->get_ctxt_size();
   }
-  cerr << "Finished reading models (s=" << time.Elapsed() << ")" << endl;
+  cout << "Finished reading models (s=" << time.Elapsed() << ")" << endl;
 
   // Create the testing/validation instances
   TrainingData train_inst, valid_inst;
@@ -380,13 +380,13 @@ int ModlmTrain::main(int argc, char** argv) {
   vector<pair<int,int> > test_words(test_files.size(), pair<int,int>(0,0));
   TrainingDataMap data_map;
   if(valid_file != "") {
-    cerr << "Creating data for " << valid_file << " (s=" << time.Elapsed() << ")" << endl;
+    cout << "Creating data for " << valid_file << " (s=" << time.Elapsed() << ")" << endl;
     valid_words = create_data(dists, max_ctxt, false, dict, valid_file, data_map);
     convert_data(data_map, valid_inst);
     data_map.clear();
   }
   for(size_t i = 0; i < test_files.size(); i++) {
-    cerr << "Creating data for " << test_files[i] << " (s=" << time.Elapsed() << ")" << endl;
+    cout << "Creating data for " << test_files[i] << " (s=" << time.Elapsed() << ")" << endl;
     test_words[i]  = create_data(dists, max_ctxt, false, dict, test_files[i], data_map);
     convert_data(data_map, test_inst[i]);
     data_map.clear();
@@ -396,17 +396,17 @@ int ModlmTrain::main(int argc, char** argv) {
   for(size_t i = 0; i < train_files.size(); i++) {
     for(size_t j = 0; j < model_locs.size(); j++) {
       if(model_locs[j].size() != 1) {
-        cerr << "Started reading model " << model_locs[j][i+1] << " (s=" << time.Elapsed() << ")" << endl;
+        cout << "Started reading model " << model_locs[j][i+1] << " (s=" << time.Elapsed() << ")" << endl;
         dists[j] = DistFactory::from_file(model_locs[j][i+1], dict);
       }
     }
-    cerr << "Creating data for " << train_files[i] << " (s=" << time.Elapsed() << ")" << endl;
+    cout << "Creating data for " << train_files[i] << " (s=" << time.Elapsed() << ")" << endl;
     pair<int,int> my_words = create_data(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_files[i], data_map);
     train_words.first += my_words.first; train_words.second += my_words.second;
   }
   convert_data(data_map, train_inst);
   dists.clear();
-  cerr << "Done creating data. Whitening... (s=" << time.Elapsed() << ")" << endl;
+  cout << "Done creating data. Whitening... (s=" << time.Elapsed() << ")" << endl;
 
   // Whiten the data if necessary
   Whitener whitener(vm_["whiten"].as<string>(), vm_["whiten_eps"].as<float>());
@@ -417,7 +417,7 @@ int ModlmTrain::main(int argc, char** argv) {
     whitener.whiten(my_inst);
 
 
-  cerr << "Creating model (s=" << time.Elapsed() << ")" << endl;
+  cout << "Creating model (s=" << time.Elapsed() << ")" << endl;
 
   // Initialize
   cnn::Model mod;
@@ -456,7 +456,7 @@ int ModlmTrain::main(int argc, char** argv) {
       }
       last_valid = valid_loss;
       // Open the output model
-      if(best_valid < valid_loss && model_out_file != "") {
+      if(best_valid > valid_loss && model_out_file != "") {
         ofstream out(model_out_file.c_str());
         if(!out) THROW_ERROR("Could not open output file: " << model_out_file);
         boost::archive::text_oarchive oa(out);
