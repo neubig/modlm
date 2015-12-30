@@ -55,7 +55,7 @@ float ModlmTrain::calc_instance(const TrainingData & data, const std::string & s
   for(auto inst : data) {
     for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
       cnn::ComputationGraph cg;
-      create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), curr_words, mod, cg);
+      create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), curr_words, update, mod, cg);
       loss += cnn::as_scalar(cg.forward());
       if(loss != loss) THROW_ERROR("Loss is not a number");
       if(update) {
@@ -81,7 +81,7 @@ float ModlmTrain::calc_instance(const TrainingData & data, const std::string & s
   return loss;
 }
 
-Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, cnn::Model & mod, cnn::ComputationGraph & cg) {
+Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, bool dropout, cnn::Model & mod, cnn::ComputationGraph & cg) {
 
   // Dynamically create the target vectors
   int num_dist = num_dense_dist_ + num_sparse_dist_;
@@ -108,6 +108,7 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
 
   // If not using context, it's really simple
   if(!use_context_) {
+    if(dropout_prob_ > 0) THROW_ERROR("dropout not implemented for no context");
     Expression nlprob = -log(transpose(probs) * softmax( parameter(cg, a_) ) );
     Expression nll = transpose(counts) * nlprob;
     return nll;
@@ -129,17 +130,23 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
     vector<Expression> expr_cat;
     if(inst.first.first.size() != 0)
       expr_cat.push_back(h);
-    // cerr << "wreps:";
-    for(size_t i = 0; i < inst.first.second.size(); i++) {
+    for(size_t i = 0; i < inst.first.second.size(); i++)
       expr_cat.push_back(lookup(cg, reps_, inst.first.second[i]));
-      // cerr << " " << inst.first.second[i];
-    }
-    // cerr << endl;
     h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
   }
   for(size_t i = 0; i < Ws_.size(); i++)
     h = tanh( parameter(cg, Ws_[i]) * h + parameter(cg, bs_[i]) );
-  Expression interp = softmax( parameter(cg, V_) * h + parameter(cg, a_) );
+  Expression softmax_input = parameter(cg, V_) * h + parameter(cg, a_);
+  Expression interp; 
+  uniform_real_distribution<float> float_distribution(0.0, 1.0);  
+  if(!dropout || dropout_prob_ == 0 || float_distribution(*cnn::rndeng) >= dropout_prob_) {
+    interp = softmax( softmax_input );
+  } else {
+    assert(dropout_spans_.size() > 0);
+    uniform_int_distribution<int> int_distribution(0, (int)dropout_spans_.size()-1);  
+    int dropout_dist = int_distribution(*cnn::rndeng);
+    interp = exp( log_softmax( softmax_input, dropout_spans_[dropout_dist] ) );
+  }
   Expression nlprob = -log(transpose(probs) * interp);
   Expression nll = transpose(counts) * nlprob;
   return nll;
@@ -267,12 +274,15 @@ int ModlmTrain::main(int argc, char** argv) {
       ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
       ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
       ("wildcards", po::value<string>()->default_value(""), "Wildcards in model/data names for cross validation")
-      ("seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
+      ("cnn_seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
       ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
+      ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints)")
+      ("dropout_prob", po::value<float>()->default_value(0.0), "Starting dropout probability")
+      ("dropout_prob_decay", po::value<float>()->default_value(1.0), "Dropout probability decay (1.0 for no decay)")
       ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
@@ -285,6 +295,14 @@ int ModlmTrain::main(int argc, char** argv) {
       cout << desc << endl;
       return 1;
   }
+
+  // Create the timer
+  Timer time;
+  cout << "Started training! (s=" << time.Elapsed() << ")" << endl;
+
+  // Temporary buffers
+  string line;
+  vector<string> strs;
 
   // Save various settings
   GlobalVars::verbose = vm_["verbose"].as<int>();
@@ -300,17 +318,21 @@ int ModlmTrain::main(int argc, char** argv) {
   clipping_enabled_ = vm_["clipping_enabled"].as<bool>();
   float rate_decay = vm_["rate_decay"].as<float>();
   string model_out_file = vm_["model_out"].as<string>();
-
-  // Set random seed if necessary
-  int seed = vm_["seed"].as<int>();
-  if(seed != 0) {
-    delete cnn::rndeng;
-    cnn::rndeng = new mt19937(seed);
-  }
+  dropout_prob_ = vm_["dropout_prob"].as<float>();
+  dropout_prob_decay_ = vm_["dropout_prob_decay"].as<float>();
 
   // Create a heuristic if using one
   if(vm_["heuristic"].as<string>() != "")
     heuristic_ = HeuristicFactory::create_heuristic(vm_["heuristic"].as<string>());
+
+  // Calculate the number of layers
+  boost::split(strs, vm_["layers"].as<string>(), boost::is_any_of(" "));
+  vector<int> hidden_size;
+  for(auto str : strs) if(str != "") hidden_size.push_back(stoi(str));
+  boost::split(strs, vm_["dropout_models"].as<string>(), boost::is_any_of(" "));
+  vector<int> dropout_models;
+  for(auto str : strs) if(str != "") dropout_models.push_back(stoi(str));
+  dropout_spans_.resize(dropout_models.size());
 
   // Get files:
   vector<string> train_files, wildcards, test_files;
@@ -322,9 +344,7 @@ int ModlmTrain::main(int argc, char** argv) {
   boost::split(test_files, vm_["test_file"].as<string>(), boost::is_any_of("|"));
   if(test_files.size() < 1 || test_files[0] == "") THROW_ERROR("Must specify at least one --test_file");
 
-  // Temporary buffers
-  string line;
-  vector<string> strs;
+  cout << "Reading vocabulary... (s=" << time.Elapsed() << ")" << endl;
 
   // Read in the vocabulary if necessary
   DictPtr dict(new cnn::Dict);
@@ -352,16 +372,38 @@ int ModlmTrain::main(int argc, char** argv) {
       THROW_ERROR("When using cross-validation on the training data, must have appropriate model size.");
     model_locs.push_back(my_locs);
   }
+
   // Read in the the testing distributions
   vector<DistPtr> dists;
   size_t max_ctxt = word_hist_;
   for(auto & locs : model_locs) {
+    cout << "Started reading model " << locs[0] << " (s=" << time.Elapsed() << ")" << endl;
     DistPtr dist = DistFactory::from_file(locs[0], dict);
     dists.push_back(dist);
     max_ctxt = max(dist->get_ctxt_len(), max_ctxt);
     num_dense_dist_ += dist->get_dense_size();
     num_sparse_dist_ += dist->get_sparse_size();
     num_ctxt_ += dist->get_ctxt_size();
+  }
+  cout << "Finished reading models (s=" << time.Elapsed() << ")" << endl;
+
+  // Find the spans for dropout if necessary
+  if(dropout_spans_.size() != 0) {
+    size_t mod_id = 0;
+    size_t curr_dense = 0, curr_sparse = 0, dense_end = 0, sparse_end = 0;
+    for(size_t did = 0; did < dists.size(); did++, curr_dense = dense_end, curr_sparse = sparse_end) {
+      dense_end += dists[did]->get_dense_size();
+      sparse_end += dists[did]->get_sparse_size();
+      for(size_t i = 0; i < dropout_spans_.size(); i++) {
+        if(mod_id != dropout_models[i]) {
+          for(size_t j = curr_dense; j < dense_end; j++)
+            dropout_spans_[i].push_back(j);
+          for(size_t j = curr_sparse; j < sparse_end; j++)
+            dropout_spans_[i].push_back(j+num_dense_dist_);
+        }
+      }
+      mod_id++;
+    }
   }
 
   // Create the testing/validation instances
@@ -371,11 +413,13 @@ int ModlmTrain::main(int argc, char** argv) {
   vector<pair<int,int> > test_words(test_files.size(), pair<int,int>(0,0));
   TrainingDataMap data_map;
   if(valid_file != "") {
+    cout << "Creating data for " << valid_file << " (s=" << time.Elapsed() << ")" << endl;
     valid_words = create_data(dists, max_ctxt, false, dict, valid_file, data_map);
     convert_data(data_map, valid_inst);
     data_map.clear();
   }
   for(size_t i = 0; i < test_files.size(); i++) {
+    cout << "Creating data for " << test_files[i] << " (s=" << time.Elapsed() << ")" << endl;
     test_words[i]  = create_data(dists, max_ctxt, false, dict, test_files[i], data_map);
     convert_data(data_map, test_inst[i]);
     data_map.clear();
@@ -384,14 +428,18 @@ int ModlmTrain::main(int argc, char** argv) {
   // Create the training instances
   for(size_t i = 0; i < train_files.size(); i++) {
     for(size_t j = 0; j < model_locs.size(); j++) {
-      if(model_locs[j].size() != 1)
+      if(model_locs[j].size() != 1) {
+        cout << "Started reading model " << model_locs[j][i+1] << " (s=" << time.Elapsed() << ")" << endl;
         dists[j] = DistFactory::from_file(model_locs[j][i+1], dict);
+      }
     }
+    cout << "Creating data for " << train_files[i] << " (s=" << time.Elapsed() << ")" << endl;
     pair<int,int> my_words = create_data(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_files[i], data_map);
     train_words.first += my_words.first; train_words.second += my_words.second;
   }
   convert_data(data_map, train_inst);
   dists.clear();
+  cout << "Done creating data. Whitening... (s=" << time.Elapsed() << ")" << endl;
 
   // Whiten the data if necessary
   Whitener whitener(vm_["whiten"].as<string>(), vm_["whiten_eps"].as<float>());
@@ -401,6 +449,9 @@ int ModlmTrain::main(int argc, char** argv) {
   for(auto & my_inst : test_inst)
     whitener.whiten(my_inst);
 
+
+  cout << "Creating model (s=" << time.Elapsed() << ")" << endl;
+
   // Initialize
   cnn::Model mod;
   TrainerPtr trainer = get_trainer(trainer_, learning_rate_, mod);
@@ -408,12 +459,6 @@ int ModlmTrain::main(int argc, char** argv) {
 
   float uniform_prob = 1.0/dict->size();
   log_unk_prob_ = vm_["penalize_unk"].as<bool>() ? log(uniform_prob) : 0;
-
-  boost::split(strs, vm_["layers"].as<string>(), boost::is_any_of(" "));
-  vector<int> hidden_size;
-  for(auto str : strs)
-    if(str != "")
-      hidden_size.push_back(stoi(str));
 
   int num_dist = num_sparse_dist_ + num_dense_dist_;
   if(use_context_) {
@@ -434,16 +479,17 @@ int ModlmTrain::main(int argc, char** argv) {
   // Train a neural network to predict the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; epoch++) { 
-    calc_instance(train_inst, "-- trn ", train_words, true, epoch, trainer, mod);
+    cout << "--- Starting epoch " << epoch << " (s=" << time.Elapsed() << ")" << endl;
+    calc_instance(train_inst, "trn ", train_words, true, epoch, trainer, mod);
     if(valid_inst.size() != 0) {
-      float valid_loss = calc_instance(valid_inst, "   vld ", valid_words, false, epoch, trainer, mod);
+      float valid_loss = calc_instance(valid_inst, "vld ", valid_words, false, epoch, trainer, mod);
       if(rate_decay != 1.0 && last_valid < valid_loss) {
         trainer->eta0 *= rate_decay;
         cout << "*** Reduced learning rate to " << trainer->eta0 << endl;
       }
       last_valid = valid_loss;
       // Open the output model
-      if(best_valid < valid_loss && model_out_file != "") {
+      if(best_valid > valid_loss && model_out_file != "") {
         ofstream out(model_out_file.c_str());
         if(!out) THROW_ERROR("Could not open output file: " << model_out_file);
         boost::archive::text_oarchive oa(out);
@@ -453,14 +499,17 @@ int ModlmTrain::main(int argc, char** argv) {
     }
     for(size_t i = 0; i < test_inst.size(); i++) {
       ostringstream oss;
-      calc_instance(test_inst[i], "   tst" + to_string(i), test_words[i], false, epoch, trainer, mod);
+      calc_instance(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch, trainer, mod);
     }
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
       trainer = get_trainer(trainer_, learning_rate_, mod);
       trainer->clipping_enabled = clipping_enabled_;
     }
+    dropout_prob_ *= dropout_prob_decay_;
   }
+
+  cout << "Done training! (s=" << time.Elapsed() << ")" << endl;
 
   return 0;
 }

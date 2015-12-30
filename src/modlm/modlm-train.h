@@ -49,7 +49,7 @@ protected:
   void convert_data(const TrainingDataMap & data_map, TrainingData & data);
   float calc_instance(const TrainingData & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch, TrainerPtr & trainer, cnn::Model & mod);
   void print_status(const std::string & strid, int epoch, float loss, std::pair<int,int> words, float percent, float elapsed);
-  cnn::expr::Expression create_graph(const TrainingInstance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, cnn::Model & mod, cnn::ComputationGraph & cg);
+  cnn::expr::Expression create_graph(const TrainingInstance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, bool dropout, cnn::Model & mod, cnn::ComputationGraph & cg);
 
   // Variable settings
   int epochs_;
@@ -72,6 +72,8 @@ protected:
   std::string trainer_;
   float learning_rate_;
   bool clipping_enabled_;
+  float dropout_prob_, dropout_prob_decay_;
+  std::vector<std::vector<unsigned> > dropout_spans_;
 
 };
 
