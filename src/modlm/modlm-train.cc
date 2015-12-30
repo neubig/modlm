@@ -280,7 +280,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
       ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
-      ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints)")
+      ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints in comma-delimited groups separated by spaces)")
       ("dropout_prob", po::value<float>()->default_value(0.0), "Starting dropout probability")
       ("dropout_prob_decay", po::value<float>()->default_value(1.0), "Dropout probability decay (1.0 for no decay)")
       ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
@@ -302,7 +302,7 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Temporary buffers
   string line;
-  vector<string> strs;
+  vector<string> strs, strs2;
 
   // Save various settings
   GlobalVars::verbose = vm_["verbose"].as<int>();
@@ -330,8 +330,15 @@ int ModlmTrain::main(int argc, char** argv) {
   vector<int> hidden_size;
   for(auto str : strs) if(str != "") hidden_size.push_back(stoi(str));
   boost::split(strs, vm_["dropout_models"].as<string>(), boost::is_any_of(" "));
-  vector<int> dropout_models;
-  for(auto str : strs) if(str != "") dropout_models.push_back(stoi(str));
+  vector<set<int> > dropout_models;
+  for(auto str : strs) if(str != "") {
+    boost::split(strs2, str, boost::is_any_of(","));
+    set<int> my_set;
+    for(auto str2 : strs2) if(str2 != "") {
+      my_set.insert(stoi(str2));
+    }
+    dropout_models.push_back(my_set);
+  }
   dropout_spans_.resize(dropout_models.size());
 
   // Get files:
@@ -395,7 +402,7 @@ int ModlmTrain::main(int argc, char** argv) {
       dense_end += dists[did]->get_dense_size();
       sparse_end += dists[did]->get_sparse_size();
       for(size_t i = 0; i < dropout_spans_.size(); i++) {
-        if(mod_id != dropout_models[i]) {
+        if(dropout_models[i].find(mod_id) == dropout_models[i].end()) {
           for(size_t j = curr_dense; j < dense_end; j++)
             dropout_spans_[i].push_back(j);
           for(size_t j = curr_sparse; j < sparse_end; j++)
@@ -479,14 +486,17 @@ int ModlmTrain::main(int argc, char** argv) {
   // Train a neural network to predict the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; epoch++) { 
-    cout << "--- Starting epoch " << epoch << " (s=" << time.Elapsed() << ")" << endl;
+    // Print info about the epoch
+    cout << "--- Starting epoch " << epoch << ": "<<(epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer->eta0;
+    if(dropout_prob_ != 0.0)
+      cout << ", dropout=" << min(dropout_prob_, 1.0f);
+    cout << " (s=" << time.Elapsed() << ")" << endl;
+    // Perform training
     calc_instance(train_inst, "trn ", train_words, true, epoch, trainer, mod);
     if(valid_inst.size() != 0) {
       float valid_loss = calc_instance(valid_inst, "vld ", valid_words, false, epoch, trainer, mod);
-      if(rate_decay != 1.0 && last_valid < valid_loss) {
+      if(rate_decay != 1.0 && last_valid < valid_loss)
         trainer->eta0 *= rate_decay;
-        cout << "*** Reduced learning rate to " << trainer->eta0 << endl;
-      }
       last_valid = valid_loss;
       // Open the output model
       if(best_valid > valid_loss && model_out_file != "") {
