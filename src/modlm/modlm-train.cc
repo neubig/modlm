@@ -486,14 +486,17 @@ int ModlmTrain::main(int argc, char** argv) {
   // Train a neural network to predict the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; epoch++) { 
-    cout << "--- Starting epoch " << epoch << " (s=" << time.Elapsed() << ")" << endl;
+    // Print info about the epoch
+    cout << "--- Starting epoch " << epoch << ": "<<(epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer->eta0;
+    if(dropout_prob_ != 0.0)
+      cout << ", dropout=" << min(dropout_prob_, 1.0f);
+    cout << " (s=" << time.Elapsed() << ")" << endl;
+    // Perform training
     calc_instance(train_inst, "trn ", train_words, true, epoch, trainer, mod);
     if(valid_inst.size() != 0) {
       float valid_loss = calc_instance(valid_inst, "vld ", valid_words, false, epoch, trainer, mod);
-      if(rate_decay != 1.0 && last_valid < valid_loss) {
+      if(rate_decay != 1.0 && last_valid < valid_loss)
         trainer->eta0 *= rate_decay;
-        cout << "*** Reduced learning rate to " << trainer->eta0 << endl;
-      }
       last_valid = valid_loss;
       // Open the output model
       if(best_valid > valid_loss && model_out_file != "") {
