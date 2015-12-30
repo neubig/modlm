@@ -194,7 +194,7 @@ void CountsMkn::add_count(const Sentence & idx, WordId wid, WordId last_fallback
 void CountsMkn::finalize_count() {
   for(auto & kv_uniq : cnts_uniq_) {
     auto & kv = cnts_[kv_uniq.first];
-    kv.reset(new ContextCounts);
+    kv.reset(new ContextCountsDisc);
     assert(kv_uniq.second != NULL);
     for(auto & cnt : kv_uniq.second->second)
       kv->cnts[cnt.first] = cnt.second.size();
