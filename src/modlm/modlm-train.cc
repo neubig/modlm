@@ -16,6 +16,8 @@
 #include <modlm/dist-ngram.h>
 #include <modlm/dist-factory.h>
 #include <modlm/dict-utils.h>
+#include <modlm/whitener.h>
+#include <modlm/heuristic.h>
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/archive/text_oarchive.hpp>
 
@@ -85,29 +87,36 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
   int num_dist = num_dense_dist_ + num_sparse_dist_;
   int num_words = (range.second - range.first);
   vector<float> wdists(num_words * num_dist, 0.0), wcnts(num_words);
-  size_t pos = 0, ptr = 0;
-  for(auto & kv : inst.second) {
-    if(pos >= range.first && pos < range.second) {
-      memcpy(&wdists[ptr], &kv.first.first[0], sizeof(float)*num_dense_dist_);
-      ptr += num_dense_dist_;
-      for(auto & elem : kv.first.second)
-        wdists[ptr + elem.first] = elem.second;
-      ptr += num_sparse_dist_;
-      wcnts[pos-range.first] = kv.second;
-      words.first += kv.second;
-    }
-    pos++;
+  size_t ptr = 0;
+  for(size_t pos = range.first; pos < range.second; pos++) {
+    auto & kv = inst.second[pos];
+    memcpy(&wdists[ptr], &kv.first.first[0], sizeof(float)*num_dense_dist_);
+    ptr += num_dense_dist_;
+    for(auto & elem : kv.first.second)
+      wdists[ptr + elem.first] = elem.second;
+    ptr += num_sparse_dist_;
+    wcnts[pos-range.first] = kv.second;
+    words.first += kv.second;
   }
   // Load the targets
   Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, wdists);
   Expression counts = input(cg, {(unsigned int)num_words}, wcnts);
 
-  // cerr << "wcnts: " << print_vec(wcnts) << endl;
+  // cerr << "wcnts:  " << print_vec(wcnts) << endl;
   // cerr << "wdists: " << print_vec(wdists) << endl;
+  // cerr << "wctxt:  " << print_vec(inst.first.first) << endl;
 
   // If not using context, it's really simple
   if(!use_context_) {
     Expression nlprob = -log(transpose(probs) * softmax( parameter(cg, a_) ) );
+    Expression nll = transpose(counts) * nlprob;
+    return nll;
+  }
+
+  // If using heuristics, then perform heuristic smoothing
+  if(heuristic_.get() != NULL) {
+    vector<float> interp = heuristic_->smooth(num_dense_dist_, inst.first.first);
+    Expression nlprob = -log( transpose(probs) * input(cg, {(unsigned int)num_dist}, interp) );
     Expression nll = transpose(counts) * nlprob;
     return nll;
   }
@@ -137,15 +146,31 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
 }
 
 inline void calc_all_contexts(const vector<DistPtr> & dists, const Sentence & sent, int hold_out, TrainingContext & ctxt) {
-   int curr_ctxt = 0;
-   for(auto dist : dists) {
-     assert(dist.get() != NULL);
-     dist->calc_ctxt_feats(sent, -1, &ctxt.first[curr_ctxt]);
-     curr_ctxt += dist->get_ctxt_size();
-   }
+ int curr_ctxt = 0;
+ for(auto dist : dists) {
+   assert(dist.get() != NULL);
+   dist->calc_ctxt_feats(sent, -1, &ctxt.first[curr_ctxt]);
+   curr_ctxt += dist->get_ctxt_size();
+ }
 }
 
-pair<int,int> ModlmTrain::create_instances(const vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const string & file_name, TrainingData & data) {
+
+void ModlmTrain::convert_data(const TrainingDataMap & data_map, TrainingData & data) {
+  data.resize(data_map.size());
+  auto outer_it = data.begin();
+  for(auto & dm : data_map) {
+    outer_it->first = dm.first;
+    outer_it->second.resize(dm.second.size());
+    auto inner_it = outer_it->second.begin();
+    for(auto & dmin : dm.second) {
+      *inner_it = dmin;
+      inner_it++;
+    }
+    outer_it++;
+  }
+}
+
+pair<int,int> ModlmTrain::create_data(const vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const string & file_name, TrainingDataMap & data) {
 
   float uniform_prob = 1.0/dict->size();
   float unk_prob = (penalize_unk_ ? uniform_prob : 1);
@@ -181,9 +206,9 @@ pair<int,int> ModlmTrain::create_instances(const vector<DistPtr> & dists, int ma
       calc_all_contexts(dists, cnts.first, -1, ctxt);
     // Prepare the pointers for each word
     Sentence wids, wcnts;
-    vector<float*> ptrs(cnts.second->second.size());
-    vector<TrainingTarget> trgs(cnts.second->second.size(), TrainingTarget(vector<float>(num_dense_dist_), vector<pair<int,float> >()));
-    for(auto & kv : cnts.second->second) {
+    vector<float*> ptrs(cnts.second->cnts.size());
+    vector<TrainingTarget> trgs(cnts.second->cnts.size(), TrainingTarget(vector<float>(num_dense_dist_), vector<pair<int,float> >()));
+    for(auto & kv : cnts.second->cnts) {
       wids.push_back(kv.first);
       wcnts.push_back(kv.second);
       total_words.first += kv.second;
@@ -246,6 +271,9 @@ int ModlmTrain::main(int argc, char** argv) {
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
+      ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
+      ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
+      ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
@@ -279,6 +307,10 @@ int ModlmTrain::main(int argc, char** argv) {
     delete cnn::rndeng;
     cnn::rndeng = new mt19937(seed);
   }
+
+  // Create a heuristic if using one
+  if(vm_["heuristic"].as<string>() != "")
+    heuristic_ = HeuristicFactory::create_heuristic(vm_["heuristic"].as<string>());
 
   // Get files:
   vector<string> train_files, wildcards, test_files;
@@ -337,10 +369,17 @@ int ModlmTrain::main(int argc, char** argv) {
   pair<int,int> train_words(0,0), valid_words(0,0);
   vector<TrainingData> test_inst(test_files.size());
   vector<pair<int,int> > test_words(test_files.size(), pair<int,int>(0,0));
-  if(valid_file != "")
-    valid_words = create_instances(dists, max_ctxt, false, dict, valid_file, valid_inst);
-  for(size_t i = 0; i < test_files.size(); i++)
-    test_words[i]  = create_instances(dists, max_ctxt, false, dict, test_files[i], test_inst[i]);
+  TrainingDataMap data_map;
+  if(valid_file != "") {
+    valid_words = create_data(dists, max_ctxt, false, dict, valid_file, data_map);
+    convert_data(data_map, valid_inst);
+    data_map.clear();
+  }
+  for(size_t i = 0; i < test_files.size(); i++) {
+    test_words[i]  = create_data(dists, max_ctxt, false, dict, test_files[i], data_map);
+    convert_data(data_map, test_inst[i]);
+    data_map.clear();
+  }
 
   // Create the training instances
   for(size_t i = 0; i < train_files.size(); i++) {
@@ -348,10 +387,19 @@ int ModlmTrain::main(int argc, char** argv) {
       if(model_locs[j].size() != 1)
         dists[j] = DistFactory::from_file(model_locs[j][i+1], dict);
     }
-    pair<int,int> my_words = create_instances(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_files[i], train_inst);
+    pair<int,int> my_words = create_data(dists, max_ctxt, vm_["hold_out"].as<bool>(), dict, train_files[i], data_map);
     train_words.first += my_words.first; train_words.second += my_words.second;
   }
+  convert_data(data_map, train_inst);
   dists.clear();
+
+  // Whiten the data if necessary
+  Whitener whitener(vm_["whiten"].as<string>(), vm_["whiten_eps"].as<float>());
+  whitener.calc_matrix(train_inst);
+  whitener.whiten(train_inst);
+  whitener.whiten(valid_inst);
+  for(auto & my_inst : test_inst)
+    whitener.whiten(my_inst);
 
   // Initialize
   cnn::Model mod;

@@ -21,13 +21,16 @@ namespace cnn {
 
 namespace modlm {
 
+class Heuristic;
+typedef std::shared_ptr<Heuristic> HeuristicPtr;
 class DistBase;
 typedef std::shared_ptr<DistBase> DistPtr;
 typedef std::shared_ptr<cnn::Dict> DictPtr;
 
 // A data structure for training instances
-typedef std::unordered_map<TrainingContext, std::unordered_map<TrainingTarget, int> > TrainingData;
-typedef std::pair<TrainingContext, std::unordered_map<TrainingTarget, int> > TrainingInstance;
+typedef std::unordered_map<TrainingContext, std::unordered_map<TrainingTarget, int> > TrainingDataMap;
+typedef std::pair<TrainingContext, std::vector<std::pair<TrainingTarget, int> > > TrainingInstance;
+typedef std::vector<TrainingInstance> TrainingData;
 
 class ModlmTrain {
 private:
@@ -42,7 +45,8 @@ public:
   
 protected:
 
-  std::pair<int,int> create_instances(const std::vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const std::string & file_name, TrainingData & data);
+  std::pair<int,int> create_data(const std::vector<DistPtr> & dists, int max_ctxt, bool hold_out, const DictPtr dict, const std::string & file_name, TrainingDataMap & data);
+  void convert_data(const TrainingDataMap & data_map, TrainingData & data);
   float calc_instance(const TrainingData & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch, TrainerPtr & trainer, cnn::Model & mod);
   void print_status(const std::string & strid, int epoch, float loss, std::pair<int,int> words, float percent, float elapsed);
   cnn::expr::Expression create_graph(const TrainingInstance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, cnn::Model & mod, cnn::ComputationGraph & cg);
@@ -50,6 +54,8 @@ protected:
   // Variable settings
   int epochs_;
   std::string model_in_file_, model_out_file_;
+
+  HeuristicPtr heuristic_;
 
   cnn::LookupParameters* reps_;
   std::vector<cnn::Parameters*> Ws_;

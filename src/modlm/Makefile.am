@@ -5,11 +5,13 @@ LIBCPP = \
   dist-train.cc \
   dist-ngram.cc \
   counts.cc \
+  whitener.cc \
   dict-utils.cc \
   dist-factory.cc \
   dist-one-hot.cc \
   dist-uniform.cc \
   dist-unk.cc \
+  heuristic.cc \
   timer.cc \
   macros.cc
 
