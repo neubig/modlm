@@ -282,7 +282,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
       ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints)")
       ("dropout_prob", po::value<float>()->default_value(0.0), "Starting dropout probability")
-      ("dropout_prob_decay", po::value<float>()->default_value(0.0), "Dropout probability decay")
+      ("dropout_prob_decay", po::value<float>()->default_value(1.0), "Dropout probability decay (1.0 for no decay)")
       ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
