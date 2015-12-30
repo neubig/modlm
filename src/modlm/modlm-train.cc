@@ -55,7 +55,7 @@ float ModlmTrain::calc_instance(const TrainingData & data, const std::string & s
   for(auto inst : data) {
     for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
       cnn::ComputationGraph cg;
-      create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), curr_words, mod, cg);
+      create_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), curr_words, update, mod, cg);
       loss += cnn::as_scalar(cg.forward());
       if(loss != loss) THROW_ERROR("Loss is not a number");
       if(update) {
@@ -81,7 +81,7 @@ float ModlmTrain::calc_instance(const TrainingData & data, const std::string & s
   return loss;
 }
 
-Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, cnn::Model & mod, cnn::ComputationGraph & cg) {
+Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, bool dropout, cnn::Model & mod, cnn::ComputationGraph & cg) {
 
   // Dynamically create the target vectors
   int num_dist = num_dense_dist_ + num_sparse_dist_;
@@ -139,12 +139,13 @@ Expression ModlmTrain::create_graph(const TrainingInstance & inst, pair<size_t,s
   Expression softmax_input = parameter(cg, V_) * h + parameter(cg, a_);
   Expression interp; 
   uniform_real_distribution<float> float_distribution(0.0, 1.0);  
-  if(dropout_prob_ == 0 || float_distribution(*cnn::rndeng) >= dropout_prob_) {
+  if(!dropout || dropout_prob_ == 0 || float_distribution(*cnn::rndeng) >= dropout_prob_) {
     interp = softmax( softmax_input );
   } else {
     assert(dropout_spans_.size() > 0);
     uniform_int_distribution<int> int_distribution(0, (int)dropout_spans_.size()-1);  
-    interp = exp( log_softmax( softmax_input, dropout_spans_[int_distribution(*cnn::rndeng)] ) );
+    int dropout_dist = int_distribution(*cnn::rndeng);
+    interp = exp( log_softmax( softmax_input, dropout_spans_[dropout_dist] ) );
   }
   Expression nlprob = -log(transpose(probs) * interp);
   Expression nll = transpose(counts) * nlprob;
@@ -375,7 +376,6 @@ int ModlmTrain::main(int argc, char** argv) {
   // Read in the the testing distributions
   vector<DistPtr> dists;
   size_t max_ctxt = word_hist_;
-  size_t mod_id = 0;
   for(auto & locs : model_locs) {
     cout << "Started reading model " << locs[0] << " (s=" << time.Elapsed() << ")" << endl;
     DistPtr dist = DistFactory::from_file(locs[0], dict);
@@ -384,12 +384,12 @@ int ModlmTrain::main(int argc, char** argv) {
     num_dense_dist_ += dist->get_dense_size();
     num_sparse_dist_ += dist->get_sparse_size();
     num_ctxt_ += dist->get_ctxt_size();
-    mod_id++;
   }
   cout << "Finished reading models (s=" << time.Elapsed() << ")" << endl;
 
   // Find the spans for dropout if necessary
   if(dropout_spans_.size() != 0) {
+    size_t mod_id = 0;
     size_t curr_dense = 0, curr_sparse = 0, dense_end = 0, sparse_end = 0;
     for(size_t did = 0; did < dists.size(); did++, curr_dense = dense_end, curr_sparse = sparse_end) {
       dense_end += dists[did]->get_dense_size();
@@ -402,6 +402,7 @@ int ModlmTrain::main(int argc, char** argv) {
             dropout_spans_[i].push_back(j+num_dense_dist_);
         }
       }
+      mod_id++;
     }
   }
 
