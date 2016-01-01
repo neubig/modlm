@@ -8,7 +8,7 @@ namespace modlm {
 
 class Whitener {
 public:
-  Whitener(const std::string & type, float epsilon) : epsilon_(epsilon), type_(type) { }
+  Whitener(const std::string & type, float epsilon) : type_(type), epsilon_(epsilon) { }
   // Find the transformation matrix for whitening in Eigen column-major format
   void calc_matrix(const AggregateData & data);
   // Perform whitening
