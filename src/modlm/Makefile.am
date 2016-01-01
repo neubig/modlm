@@ -8,6 +8,7 @@ LIBCPP = \
   whitener.cc \
   dict-utils.cc \
   dist-factory.cc \
+  builder-factory.cc \
   dist-one-hot.cc \
   dist-uniform.cc \
   dist-unk.cc \

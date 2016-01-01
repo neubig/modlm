@@ -4,7 +4,7 @@
 #include <unordered_set>
 #include <memory>
 #include <modlm/hashes.h>
-#include <modlm/training-data.h>
+#include <modlm/aggregate-data.h>
 
 namespace cnn { class Dict; }
 
@@ -42,7 +42,7 @@ public:
   virtual ContextCounts* new_counts_ptr() const { return new ContextCounts; }
 
   // Calculate the ctxtual features 
-  virtual void calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * fl);
+  virtual void calc_ctxt_feats(const Sentence & ctxt, float * fl);
   virtual size_t get_ctxt_size() { return 3; }
 
   // Calculate the ctxtual features 
@@ -50,8 +50,7 @@ public:
                                const Sentence & wids,
                                float uniform_prob,
                                float unk_prob,
-                               bool leave_one_out,
-                               std::vector<TrainingTarget> & trgs,
+                               std::vector<AggregateTarget> & trgs,
                                int & dense_offset) const;
 
   virtual void write(DictPtr dict, std::ostream & out) const;
@@ -84,7 +83,7 @@ public:
   
   virtual ContextCounts* new_counts_ptr() const override { return new ContextCountsDisc; }
   
-  virtual void calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * fl) override;
+  virtual void calc_ctxt_feats(const Sentence & ctxt, float * fl) override;
   virtual size_t get_ctxt_size() override { return 4; }
   
   virtual void write(DictPtr dict, std::ostream & out) const override;

@@ -4,7 +4,7 @@
 #include <string>
 #include <memory>
 #include <modlm/sentence.h>
-#include <modlm/training-data.h>
+#include <modlm/aggregate-data.h>
 
 namespace cnn {
   class Dict;
@@ -38,25 +38,21 @@ public:
 
   // Get the number of contextual features we can expect from this model
   virtual size_t get_ctxt_size() const = 0;
-  // And calculate these features. held_out_wid is a word id to hold out from
-  // feature calculation when leaving one out
+  // Calculate the features
   virtual void calc_ctxt_feats(const Sentence & ctxt,
-                               WordId held_out_wid,
                                float* feats_out) const = 0;
 
   // Get the number of distributions we can expect from this model
   virtual size_t get_dense_size() const = 0;
   virtual size_t get_sparse_size() const = 0;
   // And calculate these features given context, for words wids. uniform_prob
-  // is the probability assigned in unknown contexts. leave_one_out indicates
-  // whether we should subtract one from the counts for cross-validation.
+  // is the probability assigned in unknown contexts.
   // trg is the output, and offsets should be incremented after training
   virtual void calc_word_dists(const Sentence & ctxt,
                                const Sentence & wids,
                                float uniform_prob,
                                float unk_prob,
-                               bool leave_one_out,
-                               std::vector<TrainingTarget> & trgs,
+                               std::vector<AggregateTarget> & trgs,
                                int & dense_offset,
                                int & sparse_offset) const = 0;
 

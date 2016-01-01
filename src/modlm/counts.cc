@@ -22,9 +22,9 @@ void Counts::add_count(const Sentence & idx, WordId wid, WordId last_fallback) {
 // 2) The number of unique following words in this context
 // 3) The sum of 1 and 2
 // 4) A binary feature indicating unseen contexts
-void Counts::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * fl) {
+void Counts::calc_ctxt_feats(const Sentence & ctxt, float * fl) {
   auto it = cnts_.find(ctxt);
-  if(it == cnts_.end() || (held_out_wid != -1 && it->second->full_sum == 1)) {
+  if(it == cnts_.end()) {
     fl[0] = 0.0;
     fl[1] = 0.0;
     fl[2] = 1.0;
@@ -32,10 +32,6 @@ void Counts::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float *
     assert(it->second.get() != NULL);
     float full_sum = it->second->full_sum;
     float uniq = it->second->cnts.size();
-    if(held_out_wid != -1) {
-      full_sum--;
-      uniq -= (it->second->cnts[held_out_wid] == 1 ? 1 : 0);
-    }
     fl[0] = log(full_sum);
     fl[1] = log(uniq);
     fl[2] = 0.0;
@@ -49,9 +45,9 @@ void Counts::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float *
 // 4) A binary feature indicating unseen contexts
 // 5) The discounted sum of all counts for this context
 // 6) The difference between the total sum and discounted sum
-void CountsMabs::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * fl) {
+void CountsMabs::calc_ctxt_feats(const Sentence & ctxt, float * fl) {
   auto it = cnts_.find(ctxt);
-  if(it == cnts_.end() || (held_out_wid != -1 && it->second->full_sum == 1)) {
+  if(it == cnts_.end()) {
     fl[0] = 0.0;
     fl[1] = 0.0;
     fl[2] = 0.0;
@@ -61,12 +57,6 @@ void CountsMabs::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, flo
     float full_sum = it->second->full_sum;
     float uniq = it->second->cnts.size();
     float disc_sum = ((ContextCountsDisc*)it->second.get())->disc_sum;
-    if(held_out_wid != -1) {
-      full_sum -= 1;
-      uniq -= (it->second->cnts[held_out_wid] == 1 ? 1 : 0);
-      int my_cnt = it->second->cnts[held_out_wid];
-      disc_sum = disc_sum - mod_cnt(my_cnt) + mod_cnt(my_cnt-1);
-    }
     fl[0] = log(full_sum);
     fl[1] = log(uniq);
     fl[2] = log(disc_sum);
@@ -79,8 +69,7 @@ void Counts::calc_word_dists(const Sentence & ctxt,
                              const Sentence & wids,
                              float uniform_prob,
                              float unk_prob,
-                             bool leave_one_out,
-                             std::vector<TrainingTarget> & trgs,
+                             std::vector<AggregateTarget> & trgs,
                              int & dense_offset) const {
   auto it = cnts_.find(ctxt);
   if(it == cnts_.end()) {
@@ -90,15 +79,9 @@ void Counts::calc_word_dists(const Sentence & ctxt,
     for(size_t i = 0; i < wids.size(); i++) {
       auto wid = wids[i];
       auto it2 = it->second->cnts.find(wid);
-      if(it2 == it->second->cnts.end()) {
-        trgs[i].first[dense_offset] = 0.0;
-      } else if(leave_one_out) {
-        float act = mod_cnt(it2->second), disc = mod_cnt(it2->second-1);
-        float denom = (it->second->get_denominator() - act + disc);
-        trgs[i].first[dense_offset] = denom == 0.0 ? 0.0 : disc / denom;
-      } else {
-        trgs[i].first[dense_offset] = mod_cnt(it2->second) / it->second->get_denominator();
-      }
+      trgs[i].first[dense_offset] = (it2 != it->second->cnts.end() ?
+                                     mod_cnt(it2->second) / it->second->get_denominator() :
+                                     0.0);
       if(wids[i] == 0) trgs[i].first[dense_offset] *= unk_prob;
     }
   }

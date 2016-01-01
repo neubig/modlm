@@ -10,7 +10,7 @@ using namespace modlm;
 using namespace Eigen;
 
 // Find the transformation matrix for whitening in Eigen column-major format
-void Whitener::calc_matrix(const TrainingData & data) {
+void Whitener::calc_matrix(const AggregateData & data) {
 
   if(type_ == "") return;
 
@@ -62,7 +62,7 @@ void Whitener::calc_matrix(const TrainingData & data) {
   }
 }
 // Perform whitening
-void Whitener::whiten(TrainingData & data) {
+void Whitener::whiten(AggregateData & data) {
   if(type_ == "") return;
   // Create the data vector
   int data_rows = data.size();

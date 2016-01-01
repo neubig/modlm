@@ -27,21 +27,19 @@ public:
   // Get the number of ctxtual features we can expect from this model
   virtual size_t get_ctxt_size() const override { return 0; } 
   // And calculate these features
-  virtual void calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float * feats_out) const override { }
+  virtual void calc_ctxt_feats(const Sentence & ctxt, float * feats_out) const override { }
 
   // Get the number of distributions we can expect from this model
   virtual size_t get_dense_size() const override { return 1; }
   virtual size_t get_sparse_size() const override { return 0; }
   // And calculate these features given ctxt, for words wids. uniform_prob
-  // is the probability assigned in unknown ctxts. leave_one_out indicates
-  // whether we should subtract one from the counts for cross-validation.
+  // is the probability assigned in unknown ctxts.
   // prob_out is the output, which should be incremented after writing.
   virtual void calc_word_dists(const Sentence & ctxt,
                                const Sentence & wids,
                                float uniform_prob,
                                float unk_prob,
-                               bool leave_one_out,
-                               std::vector<TrainingTarget> & trgs,
+                               std::vector<AggregateTarget> & trgs,
                                int & dense_offset,
                                int & sparse_offset) const override;
 

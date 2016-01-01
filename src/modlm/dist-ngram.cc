@@ -94,11 +94,11 @@ Sentence DistNgram::calc_ctxt(const Sentence & in, int pos, const Sentence & ctx
 }
 
 // And calculate these features
-void DistNgram::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, float* feats_out) const {
+void DistNgram::calc_ctxt_feats(const Sentence & ctxt, float* feats_out) const {
   Sentence this_ctxt;
   int offset = 0;
   for(size_t j = 0; ; j++) {
-    (*counts_[j]).calc_ctxt_feats(this_ctxt, held_out_wid, feats_out + offset);
+    (*counts_[j]).calc_ctxt_feats(this_ctxt, feats_out + offset);
     offset += counts_[j]->get_ctxt_size();
     if(j >= ctxt_pos_.size()) break;
     this_ctxt.push_back(ctxt[ctxt_pos_[j]-1]);
@@ -106,21 +106,19 @@ void DistNgram::calc_ctxt_feats(const Sentence & ctxt, WordId held_out_wid, floa
 }
 
 // And calculate these features given ctxt, for words wids. uniform_prob
-// is the probability assigned in unknown ctxts. leave_one_out indicates
-// whether we should subtract one from the counts for cross-validation.
+// is the probability assigned in unknown ctxts.
 // prob_out is output pointer, which should be incremented after writing.
 
 void DistNgram::calc_word_dists(const Sentence & ctxt,
                                 const Sentence & wids,
                                 float uniform_prob,
                                 float unk_prob,
-                                bool leave_one_out,
-                                std::vector<TrainingTarget> & trgs,
+                                std::vector<AggregateTarget> & trgs,
                                 int & dense_offset,
                                 int & sparse_offset) const {
   Sentence this_ctxt;
   for(size_t j = 0; j < counts_.size(); j++) {
-    (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, unk_prob, leave_one_out, trgs, dense_offset);
+    (*counts_[j]).calc_word_dists(this_ctxt, wids, uniform_prob, unk_prob, trgs, dense_offset);
     assert(j <= ctxt_pos_.size());
     if(j < ctxt_pos_.size())
       this_ctxt.push_back(ctxt[ctxt_pos_[j]-1]);
