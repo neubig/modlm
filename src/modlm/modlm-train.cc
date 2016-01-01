@@ -84,18 +84,23 @@ ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float 
 
 // *************** Calculation for both sentence-based and aggregate training
 
-Expression ModlmTrain::add_to_graph(const std::vector<float> & wctxt, const std::vector<WordId> & words, const vector<float> & wdists_, const vector<float> & wcnts, bool dropout, cnn::ComputationGraph & cg) {
+Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
+                                    const std::vector<WordId> & ctxt_words,
+                                    const vector<float> & out_dists,
+                                    const vector<float> & out_cnts,
+                                    bool dropout,
+                                    cnn::ComputationGraph & cg) {
   if(builder_.get() != NULL)
     THROW_ERROR("Recurrent nets are not supported yet");
   // Load the targets
   int num_dist = num_sparse_dist_ + num_dense_dist_;
-  int num_words = words.size();
-  Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, wdists_);
-  Expression counts = input(cg, {(unsigned int)num_words}, wcnts);
+  int num_words = out_cnts.size();
+  Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, out_dists);
+  Expression counts = input(cg, {(unsigned int)num_words}, out_cnts);
 
-  // cerr << "wcnts:  " << print_vec(wcnts) << endl;
-  // cerr << "wdists_: " << print_vec(wdists_) << endl;
-  // cerr << "wctxt:  " << print_vec(wctxt) << endl;
+  // cerr << "out_cnts:  " << print_vec(out_cnts) << endl;
+  // cerr << "out_dists: " << print_vec(out_dists) << endl;
+  // cerr << "ctxt_feats:  " << print_vec(ctxt_feats) << endl;
 
   // If not using context, it's really simple
   if(!use_context_) {
@@ -107,22 +112,22 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & wctxt, const std:
 
   // If using heuristics, then perform heuristic smoothing
   if(heuristic_.get() != NULL) {
-    vector<float> interp = heuristic_->smooth(num_dense_dist_, wctxt);
+    vector<float> interp = heuristic_->smooth(num_dense_dist_, ctxt_feats);
     Expression nlprob = -log( transpose(probs) * input(cg, {(unsigned int)num_dist}, interp) );
     Expression nll = transpose(counts) * nlprob;
     return nll;
   }
 
   // Add the context for this instance
-  Expression h = input(cg, {(unsigned int)wctxt.size()}, wctxt);
+  Expression h = input(cg, {(unsigned int)ctxt_feats.size()}, ctxt_feats);
 
   // Do the NN computation
   if(word_hist_ != 0) {
     vector<Expression> expr_cat;
-    if(wctxt.size() != 0)
+    if(ctxt_feats.size() != 0)
       expr_cat.push_back(h);
-    for(size_t i = 0; i < words.size(); i++)
-      expr_cat.push_back(lookup(cg, reps_, words[i]));
+    for(size_t i = 0; i < ctxt_words.size(); i++)
+      expr_cat.push_back(lookup(cg, reps_, ctxt_words[i]));
     h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
   }
   for(size_t i = 0; i < Ws_.size(); i++)
@@ -175,7 +180,7 @@ float ModlmTrain::calc_aggregate_instance(const AggregateData & data, const std:
   float loss = 0.0, print_every = 60.0, elapsed;
   float last_print = 0;
   Timer time;
-  pair<int,int> curr_words(0,-1);
+  pair<int,int> curr_words(0,0);
   int data_done = 0;
   for(auto inst : data) {
     for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
@@ -189,14 +194,14 @@ float ModlmTrain::calc_aggregate_instance(const AggregateData & data, const std:
           trainer_->update();
       }
     }
-    elapsed = time_.Elapsed();
+    elapsed = time.Elapsed();
     data_done++;
     if(elapsed > last_print + print_every) {
       print_status(strid, epoch, loss, curr_words, 100.0*curr_words.first/words.first, elapsed);
       last_print += print_every;
     }
   }
-  elapsed = time_.Elapsed();
+  elapsed = time.Elapsed();
   print_status(strid, epoch, loss, words, -1, elapsed);
   if(update) {
     if(online_epochs_ != -1 && epoch > online_epochs_)
@@ -339,7 +344,7 @@ void ModlmTrain::train_aggregate() {
       cout << ", dropout=" << min(dropout_prob_, 1.0f);
     cout << " (s=" << time_.Elapsed() << ")" << endl;
     // Perform training
-    calc_aggregate_instance(train_inst, "trn ", train_words, dropout_prob_ > 0.0, epoch);
+    calc_aggregate_instance(train_inst, "trn ", train_words, true, epoch);
     if(valid_inst.size() != 0) {
       float valid_loss = calc_aggregate_instance(valid_inst, "vld ", valid_words, false, epoch);
       if(rate_decay_ != 1.0 && last_valid < valid_loss)
@@ -403,7 +408,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("test_file", po::value<string>()->default_value(""), "One or more testing files split with pipes")
       ("train_file", po::value<string>()->default_value(""), "One or more training files split with pipes")
       ("trainer", po::value<string>()->default_value("adam"), "Training algorithm (sgd/momentum/adagrad/adadelta/adam)")
-      ("training_type", po::value<string>()->default_value("aggregate"), "Train using aggregate or sentence-wise examples (agg/sent)")
+      ("training_type", po::value<string>()->default_value("agg"), "Train using aggregate or sentence-wise examples (agg/sent)")
       ("use_context", po::value<bool>()->default_value(true), "If set to false, learn context-independent coefficients")
       ("valid_file", po::value<string>()->default_value(""), "Validation file for tuning parameters")
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
@@ -442,7 +447,7 @@ int ModlmTrain::main(int argc, char** argv) {
   trainer_id_ = vm["trainer"].as<string>();
   learning_rate_ = vm["learning_rate"].as<float>();
   clipping_enabled_ = vm["clipping_enabled"].as<bool>();
-  training_type_ = vm["training_type"].as<bool>();
+  training_type_ = vm["training_type"].as<string>();
   rate_decay_ = vm["rate_decay"].as<float>();
   model_out_file_ = vm["model_out"].as<string>();
   dropout_prob_ = vm["dropout_prob"].as<float>();
