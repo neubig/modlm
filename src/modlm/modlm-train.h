@@ -33,6 +33,7 @@ class DistBase;
 typedef std::shared_ptr<DistBase> DistPtr;
 typedef std::shared_ptr<cnn::Dict> DictPtr;
 typedef std::shared_ptr<cnn::RNNBuilder> BuilderPtr;
+class NgramIndexer;
 
 // A data structure for aggregate training instances
 typedef std::unordered_map<AggregateContext, std::unordered_map<DistTarget, int> > AggregateDataMap;
@@ -62,6 +63,7 @@ protected:
   std::pair<int,int> create_aggregate_data(const std::string & file_name, AggregateDataMap & data);
   void convert_aggregate_data(const AggregateDataMap & data_map, AggregateData & data);
   cnn::expr::Expression create_aggregate_graph(const AggregateInstance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, bool dropout, cnn::ComputationGraph & cg);
+  void sanity_check_aggregate(const NgramIndexer & my_counts, float uniform_prob, float unk_prob);
 
   // *** Sentence-wise training stuff
   void train_sentencewise();

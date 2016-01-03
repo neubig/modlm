@@ -229,6 +229,38 @@ void ModlmTrain::convert_aggregate_data(const AggregateDataMap & data_map, Aggre
   }
 }
 
+void ModlmTrain::sanity_check_aggregate(const NgramIndexer & my_counts, float uniform_prob, float unk_prob) {
+  cerr << "Performing sanity check" << endl;
+  std::unordered_set<Sentence> checked_ctxts;
+  for(const auto & my_count : my_counts.get_index()) {
+    Sentence my_ctxt(my_count.first); my_ctxt.resize(my_ctxt.size()-1);
+    if(checked_ctxts.find(my_ctxt) == checked_ctxts.end()) {
+      Sentence my_ngram(my_count.first);
+      vector<float> dist_trg_sum(num_dense_dist_);
+      for(WordId wid = 0; wid < dict_->size(); wid++) {
+        *my_ngram.rbegin() = wid;
+        DistTarget dist_trg; dist_trg.first.resize(num_dense_dist_);
+        int dense_offset = 0, sparse_offset = 0;
+        for(auto dist : dists_)
+          dist->calc_word_dists(my_ngram, uniform_prob, unk_prob, dist_trg, dense_offset, sparse_offset);
+        // cerr << "   " << dict_->Convert(wid) << ":";
+        for(size_t did = 0; did < num_dense_dist_; did++) {
+          dist_trg_sum[did] += dist_trg.first[did] / (wid == 0 ? unk_prob : 1.f);
+          // cerr << ' ' << dist_trg.first[did];
+        }
+        // cerr << endl;
+      }
+      for(size_t did = 0; did < num_dense_dist_; did++) {
+        // cerr << "Distribution " << did << " for " << PrintSentence(my_ctxt, dict_) << ": " << dist_trg_sum[did] << endl;
+        if(dist_trg_sum[did] > 1.01f || dist_trg_sum[did] < 0.99f)
+          THROW_ERROR("Distribution " << did << " for " << PrintSentence(my_ctxt, dict_) << " > 1: " << dist_trg_sum[did]);
+      }
+      checked_ctxts.insert(my_ctxt);
+    }
+  }
+  cerr << "Sanity check passed" << endl;
+}
+
 pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, AggregateDataMap & data) {
 
   float uniform_prob = 1.0/dict_->size();
@@ -247,6 +279,9 @@ pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, Aggreg
       my_counts.add_counts(sent);
     }
   }
+
+  // // Perform a sanity check
+  // sanity_check_aggregate(my_counts, uniform_prob, unk_prob);
 
   // Create training data (num words, ctxt features, each model, true counts)
   pair<int,int> total_words(0,0);

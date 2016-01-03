@@ -198,7 +198,7 @@ void DistNgram::calc_ctxt_feats(const Sentence & ctxt, float* feats_out) const {
   int ctxt_size = (smoothing_ == SMOOTH_LIN ? 3 : 4);
   for(int j = ctxt_pos_.size(); j >= 0; j--) {
     int id = get_existing_ctxt_id(ngram);
-    if(id == -1) {
+    if(id == -1 || ctxt_cnts_[id].second == 0) {
       for(int j2 = j; j2 >= 0; j2--) {
         *(feats_out++) = 1.f;
         for(size_t i = 1; i < ctxt_size; i++) *(feats_out++) = 0.f;
@@ -222,21 +222,26 @@ void DistNgram::calc_word_dists(const Sentence & ngram,
                                 DistTarget & trg,
                                 int & dense_offset,
                                 int & sparse_offset) const {
+  float base_prob = (*ngram.rbegin() != 0 ? 1.0 : unk_prob);
   Sentence this_ngram(1, *ngram.rbegin()), this_ctxt;
   for(int j = ctxt_pos_.size(); j >= 0; j--) {
     auto ngram_it = mapping_.find(this_ngram);
-    if(ngram_it == mapping_.end()) {
-      for(int j2 = j; j2 >= 0; j2--)
-        trg.first[dense_offset++] = 0.f;
-      break;
-    }
     auto context_it = mapping_.find(this_ctxt);
-    assert(context_it != mapping_.end());
-    int value = (j == 0 ? ngram_it->second : ctxt_cnts_[ngram_it->second].first);
-    if(smoothing_ == SMOOTH_MABS || smoothing_ == SMOOTH_MKN)
-      trg.first[dense_offset++] = (value-discounts_[j][min(value,3)])/disc_ctxt_cnts_[context_it->second];
-    else
-      trg.first[dense_offset++] = value/(float)ctxt_cnts_[context_it->second].second;
+    if(ngram_it == mapping_.end()) {
+      float my_prob = (context_it != mapping_.end() ? 0.0 : uniform_prob * base_prob);
+      // cerr << "my_prob: " << my_prob << endl;
+      trg.first[dense_offset++] = my_prob;
+    } else {
+      assert(context_it != mapping_.end());
+      int value = (j == 0 ? ngram_it->second : ctxt_cnts_[ngram_it->second].first);
+      if(smoothing_ == SMOOTH_MABS || smoothing_ == SMOOTH_MKN) {
+        // cerr << "value: " << (value-discounts_[this_ctxt.size()][min(value,3)]) << "/" << disc_ctxt_cnts_[context_it->second] * base_prob << endl;
+        trg.first[dense_offset++] = (value-discounts_[this_ctxt.size()][min(value,3)])/disc_ctxt_cnts_[context_it->second] * base_prob;
+      } else {
+        // cerr << "value: " << value << "/" << (float)ctxt_cnts_[context_it->second].second * base_prob << endl;
+        trg.first[dense_offset++] = value/(float)ctxt_cnts_[context_it->second].second * base_prob;
+      }
+    }
     if(j != 0) {
       this_ngram.insert(this_ngram.begin(), ngram[ngram.size()-ctxt_pos_[j-1]-1]);
       this_ctxt.insert(this_ctxt.begin(), ngram[ngram.size()-ctxt_pos_[j-1]-1]);
@@ -248,10 +253,13 @@ void DistNgram::calc_word_dists(const Sentence & ngram,
 #define DIST_NGRAM_VERSION "distngram_v2"
 void DistNgram::write(DictPtr dict, std::ostream & out) const {
   out << DIST_NGRAM_VERSION << '\n';
-  out << "discounts " << discounts_.size() << '\n';  
-  for(auto & discount : discounts_)
-    out << discount[1] << ' ' << discount[2] << ' ' << discount[3] << '\n';
-  out << '\n' << "mapping " << mapping_.size() << ' ' << ctxt_cnts_.size() << '\n';
+  if(smoothing_ != SMOOTH_LIN) {
+    out << "discounts " << discounts_.size() << '\n';  
+    for(auto & discount : discounts_)
+      out << discount[1] << ' ' << discount[2] << ' ' << discount[3] << '\n';
+    out << '\n';
+  }
+  out << "mapping " << mapping_.size() << ' ' << ctxt_cnts_.size() << '\n';
   for(auto & map_elem : mapping_) {
     out << PrintSentence(map_elem.first, dict) << '\t';
     if(map_elem.first.size() == ngram_len_) {
@@ -281,7 +289,7 @@ void DistNgram::read(DictPtr dict, std::istream & in) {
   float cnt4;
   getline_expected(in, DIST_NGRAM_VERSION);
   // Get the discounts
-  {
+  if(smoothing_ != SMOOTH_LIN) {
     getline_or_die(in, line);
     istringstream iss(line); iss >> strid >> size;
     if(strid != "discounts" || size != ngram_len_) THROW_ERROR("Bad format of discounts: " << line << endl);
