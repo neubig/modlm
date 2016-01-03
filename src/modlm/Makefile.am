@@ -14,6 +14,7 @@ LIBCPP = \
   dist-unk.cc \
   ngram-indexer.cc \
   heuristic.cc \
+  input-file-stream.cc \
   timer.cc \
   macros.cc
 
@@ -33,6 +34,7 @@ LDADD=libmodlm.la \
     $(BOOST_SYSTEM_LIB) \
     $(BOOST_PROGRAM_OPTIONS_LIB) \
     $(BOOST_SERIALIZATION_LIB) \
+    $(BOOST_IOSTREAMS_LIB) \
     $(OPENMP_CXXFLAGS)
 
 bin_PROGRAMS = modlm-train dist-train

@@ -21,6 +21,7 @@
 #include <modlm/whitener.h>
 #include <modlm/heuristic.h>
 #include <modlm/ngram-indexer.h>
+#include <modlm/input-file-stream.h>
 
 using namespace std;
 using namespace modlm;
@@ -522,7 +523,7 @@ int ModlmTrain::main(int argc, char** argv) {
   string vocab_file = vm["vocab_file"].as<string>();
   if(vocab_file == "")
     THROW_ERROR("Must specify a vocabulary file");
-  ifstream vocab_in(vocab_file);
+  InputFileStream vocab_in(vocab_file);
   if(!(getline(vocab_in, line) && line == "<unk>" && getline(vocab_in, line) && line == "<s>"))
     THROW_ERROR("First two lines of a vocabulary file must be <unk> and <s>: " << vocab_file);
   while(getline(vocab_in, line))

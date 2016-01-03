@@ -6,6 +6,7 @@
 #include <modlm/dist-one-hot.h>
 #include <modlm/sentence.h>
 #include <modlm/macros.h>
+#include <modlm/input-file-stream.h>
 
 
 using namespace std;
@@ -26,7 +27,7 @@ DistPtr DistFactory::create_dist(const std::string & sig) {
 }
 
 DistPtr DistFactory::from_file(const std::string & file_name, DictPtr dict) {
-  ifstream in(file_name);
+  InputFileStream in(file_name);
   if(!in) THROW_ERROR("Could not open " << file_name);
   string line;
   if(!getline(in, line)) THROW_ERROR("Premature end of file");

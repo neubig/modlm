@@ -9,8 +9,9 @@ test_modlm_SOURCES = \
 test_modlm_LDADD = \
 	../modlm/libmodlm.la \
     $(CNN_LDFLAGS) \
-	$(BOOST_LDFLAGS) \
-	$(BOOST_UNIT_TEST_FRAMEWORK_LIB) \
+    $(BOOST_LDFLAGS) \
+    $(BOOST_UNIT_TEST_FRAMEWORK_LIB) \
     $(BOOST_PROGRAM_OPTIONS_LIB) \
     $(BOOST_SERIALIZATION_LIB) \
+    $(BOOST_IOSTREAMS_LIB) \
     $(OPENMP_CXXFLAGS)
