@@ -4,13 +4,17 @@
 #include <string>
 #include <memory>
 #include <modlm/sentence.h>
-#include <modlm/aggregate-data.h>
 
 namespace cnn {
   class Dict;
 }
 
 namespace modlm {
+
+// A training target, where:
+// * first is a dense vector of distributions
+// * second is a sparse vector of distributions
+typedef std::pair<std::vector<float>, std::vector<std::pair<int, float> > > DistTarget;
 
 typedef std::shared_ptr<cnn::Dict> DictPtr;
 
@@ -45,14 +49,14 @@ public:
   // Get the number of distributions we can expect from this model
   virtual size_t get_dense_size() const = 0;
   virtual size_t get_sparse_size() const = 0;
-  // And calculate these features given context, for words wids. uniform_prob
-  // is the probability assigned in unknown contexts.
-  // trg is the output, and offsets should be incremented after training
-  virtual void calc_word_dists(const Sentence & ctxt,
-                               const Sentence & wids,
+  // Calculate the probability of the last word in "ngram" given the context.
+  // uniform_prob and unk_prob are probabilities of the uniform distribution,
+  // and the unknown word penalty. DistTarget is the target distributions, and
+  // the offset tell us the index to write to for dense or sparse distributions.
+  virtual void calc_word_dists(const Sentence & ngram,
                                float uniform_prob,
                                float unk_prob,
-                               std::vector<AggregateTarget> & trgs,
+                               DistTarget & trg,
                                int & dense_offset,
                                int & sparse_offset) const = 0;
 

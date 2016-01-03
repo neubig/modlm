@@ -12,6 +12,7 @@ LIBCPP = \
   dist-one-hot.cc \
   dist-uniform.cc \
   dist-unk.cc \
+  ngram-indexer.cc \
   heuristic.cc \
   timer.cc \
   macros.cc

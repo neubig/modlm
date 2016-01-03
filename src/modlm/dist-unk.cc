@@ -8,15 +8,11 @@ DistUnk::DistUnk(const std::string & sig) : DistBase(sig) {
     THROW_ERROR("Bad signature: " << sig);
 }
 
-void DistUnk::calc_word_dists(const Sentence & ctxt,
-                             const Sentence & wids,
+void DistUnk::calc_word_dists(const Sentence & ngram,
                              float uniform_prob,
                              float unk_prob,
-                             std::vector<AggregateTarget> & trgs,
+                             DistTarget & trg,
                              int & dense_offset,
                              int & sparse_offset) const {
-  for(size_t i = 0; i < wids.size(); i++) 
-    if(wids[i] == 0)
-      trgs[i].first[dense_offset] = unk_prob;
-  dense_offset++;
+  trg.first[dense_offset++] = (*ngram.rbegin() == 0 ? unk_prob : 0.f);
 }

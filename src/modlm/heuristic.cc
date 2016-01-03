@@ -11,9 +11,9 @@ std::vector<float> HeuristicAbs::smooth(int num_dists, const std::vector<float> 
   vector<float> ret(num_dists, 0.0);
   float left = 1.0;
   for(int i = num_dists-2; i >= 0; i--) {
-    if(ctxts[i*4+3] == 1.0) continue;
+    if(ctxts[i*4] == 1.0) continue;
     // Discounted divided by total == amount for this dist
-    float my_prob = exp(ctxts[i*4+2]-ctxts[i*4]);
+    float my_prob = exp(ctxts[i*4+3]-ctxts[i*4+1]);
     ret[i] = my_prob * left;
     left *= (1-my_prob);
   }
@@ -27,9 +27,9 @@ std::vector<float> HeuristicWb::smooth(int num_dists, const std::vector<float> &
   vector<float> ret(num_dists, 0.0);
   float left = 1.0;
   for(int i = num_dists-2; i >= 0; i--) {
-    if(ctxts[i*3+2] == 1.0) continue;
+    if(ctxts[i*3] == 1.0) continue;
     // Discounted divided by total == amount for this dist
-    float word = exp(ctxts[i*3]), uniq = exp(ctxts[i*3+1]);
+    float word = exp(ctxts[i*3+1]), uniq = exp(ctxts[i*3+2]);
     float my_prob = word/(word+uniq);
     ret[i] = my_prob * left;
     left *= (1-my_prob);

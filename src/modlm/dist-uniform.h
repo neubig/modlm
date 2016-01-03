@@ -32,14 +32,10 @@ public:
   // Get the number of distributions we can expect from this model
   virtual size_t get_dense_size() const override { return 1; }
   virtual size_t get_sparse_size() const override { return 0; }
-  // And calculate these features given ctxt, for words wids. uniform_prob
-  // is the probability assigned in unknown ctxts.
-  // prob_out is the output, which should be incremented after writing.
-  virtual void calc_word_dists(const Sentence & ctxt,
-                               const Sentence & wids,
+  virtual void calc_word_dists(const Sentence & ngram,
                                float uniform_prob,
                                float unk_prob,
-                               std::vector<AggregateTarget> & trgs,
+                               DistTarget & trg,
                                int & dense_offset,
                                int & sparse_offset) const override;
 

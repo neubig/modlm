@@ -35,7 +35,7 @@ typedef std::shared_ptr<cnn::Dict> DictPtr;
 typedef std::shared_ptr<cnn::RNNBuilder> BuilderPtr;
 
 // A data structure for aggregate training instances
-typedef std::unordered_map<AggregateContext, std::unordered_map<AggregateTarget, int> > AggregateDataMap;
+typedef std::unordered_map<AggregateContext, std::unordered_map<DistTarget, int> > AggregateDataMap;
 
 class ModlmTrain {
 private:

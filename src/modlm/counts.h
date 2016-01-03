@@ -46,11 +46,10 @@ public:
   virtual size_t get_ctxt_size() { return 3; }
 
   // Calculate the ctxtual features 
-  virtual void calc_word_dists(const Sentence & ctxt,
-                               const Sentence & wids,
+  virtual void calc_word_dists(const Sentence & ngram,
                                float uniform_prob,
                                float unk_prob,
-                               std::vector<AggregateTarget> & trgs,
+                               DistTarget & trg,
                                int & dense_offset) const;
 
   virtual void write(DictPtr dict, std::ostream & out) const;

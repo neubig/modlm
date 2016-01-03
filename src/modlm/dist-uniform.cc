@@ -8,15 +8,11 @@ DistUniform::DistUniform(const std::string & sig) : DistBase(sig) {
     THROW_ERROR("Bad signature: " << sig);
 }
 
-void DistUniform::calc_word_dists(const Sentence & ctxt,
-                             const Sentence & wids,
-                             float uniform_prob,
-                             float unk_prob,
-                             std::vector<AggregateTarget> & trgs,
-                             int & dense_offset,
-                             int & sparse_offset) const {
-  for(size_t i = 0; i < wids.size(); i++) {
-    trgs[i].first[dense_offset] = (wids[i] == 0 ? uniform_prob * unk_prob : uniform_prob);
-  }
-  dense_offset++;
+void DistUniform::calc_word_dists(const Sentence & ngram,
+                                  float uniform_prob,
+                                  float unk_prob,
+                                  DistTarget & trg,
+                                  int & dense_offset,
+                                  int & sparse_offset) const {
+  trg.first[dense_offset++] = (*ngram.rbegin() == 0 ? uniform_prob * unk_prob : uniform_prob);
 }

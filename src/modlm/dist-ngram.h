@@ -2,13 +2,21 @@
 
 #include <iostream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <modlm/sentence.h>
 #include <modlm/dist-base.h>
+#include <modlm/hashes.h>
 
 namespace modlm {
 
-class Counts;
-typedef std::shared_ptr<Counts> CountsPtr;
+struct DistNgramCounts {
+  DistNgramCounts() : first(0), second(0), third(0) { }
+  DistNgramCounts(int f, int s, int t) : first(f), second(s), third(t) { }
+  int first;  // the actual count of the ngram
+  int second; // the count of the context
+  int third;  // the number of unique words following the context
+};
 
 // A class for the n-gram distribution
 class DistNgram : public DistBase {
@@ -42,16 +50,12 @@ public:
   virtual void calc_ctxt_feats(const Sentence & ctxt, float * feats_out) const override;
 
   // Get the number of distributions we can expect from this model
-  virtual size_t get_dense_size() const override { return counts_.size(); }
+  virtual size_t get_dense_size() const override { return ngram_len_; }
   virtual size_t get_sparse_size() const override { return 0; }
-  // And calculate these features given ctxt, for words wids. uniform_prob
-  // is the probability assigned in unknown ctxts.
-  // prob_out is the output.
-  virtual void calc_word_dists(const Sentence & ctxt,
-                               const Sentence & wids,
+  virtual void calc_word_dists(const Sentence & ngram,
                                float uniform_prob,
                                float unk_prob,
-                               std::vector<AggregateTarget> & trgs,
+                               DistTarget & trg,
                                int & dense_offset,
                                int & sparse_offset) const override;
 
@@ -60,14 +64,45 @@ public:
   virtual void read(DictPtr dict, std::istream & str) override;
 
   // Create the context
-  static Sentence calc_ctxt(const Sentence & in, int pos, const Sentence & ctxid);
+  int get_ctxt_id(const Sentence & ngram);
+  int get_tmp_ctxt_id(const Sentence & ngram);
+  int get_existing_ctxt_id(const Sentence & ngram) const;
+  
 
 protected:
 
+  typedef enum { SMOOTH_LIN, SMOOTH_MABS, SMOOTH_MKN } SmoothType;
 
-  std::vector<CountsPtr> counts_;
+  // Assume we have 3-grams
+  // ** Standard
+  //  - After add_stats
+  //   - 3-gram counts will be held in mapping_[ngram]
+  //   - 2-gram and 1-gram counts will be held in ctxt_cnts_[mapping_[ngram]].word_cnt
+  //  - After finalize stats
+  //   - All context counts will be held in ctxt_cnts_[mapping_[ngram]].ctxt_true
+  // ** KN
+  //  - After add_stats
+  //   - 3-gram counts added to mapping_[ngram], and 2-gram to aux_cnts_[mapping_[ngram]]
+  //  - After finalize stats (for abc)
+  //   - If 3-gram
+  //    - The full count to ctxt_cnts_[ab].ctxt_true
+  //   - One to ctxt_cnts_[b].ctxt_true and ctxt_cnts_[bc]
+
+  // A mapping from either counts or positions in the count array, depending
+  // on whether the n-gram is the longest allowed.
+  std::unordered_map<Sentence, int> mapping_, tmp_mapping_;
+  // Counts for word context, etc
+  std::vector<DistNgramCounts> ctxt_cnts_;
+  // Discounted counts
+  std::vector<float> disc_ctxt_cnts_;
+  // Discounts
+  std::vector<std::vector<float> > discounts_;
+  // Auxilliary counts only used when calculating KN
+  std::vector<int> aux_cnts_;
+  // The position of the contexts, smoothing type, and number of distributions
   std::vector<int> ctxt_pos_;
-  std::string use_which_, smoothing_;
+  SmoothType smoothing_;
+  size_t ngram_len_;
 
 };
 

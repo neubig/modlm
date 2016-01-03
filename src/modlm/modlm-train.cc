@@ -5,6 +5,8 @@
 #include <boost/program_options.hpp>
 #include <boost/range/irange.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/text_oarchive.hpp>
 #include <cnn/expr.h>
 #include <cnn/cnn.h>
 #include <cnn/dict.h>
@@ -18,8 +20,7 @@
 #include <modlm/dict-utils.h>
 #include <modlm/whitener.h>
 #include <modlm/heuristic.h>
-#include <boost/archive/text_iarchive.hpp>
-#include <boost/archive/text_oarchive.hpp>
+#include <modlm/ngram-indexer.h>
 
 using namespace std;
 using namespace modlm;
@@ -132,6 +133,7 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
   }
   for(size_t i = 0; i < Ws_.size(); i++)
     h = tanh( parameter(cg, Ws_[i]) * h + parameter(cg, bs_[i]) );
+
   Expression softmax_input = parameter(cg, V_) * h + parameter(cg, a_);
   // Calculate which interpolation coefficients to use
   int dropout_set = dropout ? calc_dropout_set() : -1;
@@ -231,20 +233,18 @@ pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, Aggreg
 
   float uniform_prob = 1.0/dict_->size();
   float unk_prob = (penalize_unk_ ? uniform_prob : 1);
-  pair<int,CountsPtr> ret(0, CountsPtr(new Counts));
+  
+  // Calculate n-gram counts with a profile
+  NgramIndexer my_counts(max_ctxt_+1);
 
   // Load counts
   {
     ifstream in(file_name);
     if(!in) THROW_ERROR("Could not open in create_instances: " << file_name);
     string line;
-    Sentence ctxt;
-    for(int i = 1; i <= max_ctxt_; i++)
-      ctxt.push_back(i);
     while(getline(in, line)) {
       Sentence sent = ParseSentence(line, dict_, true);
-      for(int i : boost::irange(0, (int)sent.size()))
-        ret.second->add_count(DistNgram::calc_ctxt(sent, i, ctxt), sent[i], -1);
+      my_counts.add_counts(sent);
     }
   }
 
@@ -255,35 +255,29 @@ pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, Aggreg
   ctxt.first.resize(num_ctxt_);
   ctxt.second.resize(word_hist_);
   // Loop through each of the contexts
-  for(auto & cnts : ret.second->get_cnts()) {
+  for(auto & kv : my_counts.get_index()) {
+    // Create a vector containing only the context words
+    Sentence ctxt_words = kv.first;
+    ctxt_words.resize(ctxt_words.size() - 1);
     // Calculate the words and contexts
-    for(int i = 0; i < word_hist_; i++)
-      ctxt.second[i] = cnts.first[i];
+    for(int i = ctxt_words.size()-word_hist_; i < ctxt_words.size(); i++)
+      ctxt.second[i] = ctxt_words[ctxt_words.size()+i];
     int curr_ctxt = 0;
     for(auto dist : dists_) {
       assert(dist.get() != NULL);
-      dist->calc_ctxt_feats(cnts.first, &ctxt.first[curr_ctxt]);
+      dist->calc_ctxt_feats(ctxt_words, &ctxt.first[curr_ctxt]);
       curr_ctxt += dist->get_ctxt_size();
     }
     // Prepare the pointers for each word
-    Sentence wids, wcnts;
-    vector<float*> ptrs(cnts.second->cnts.size());
-    vector<AggregateTarget> trgs(cnts.second->cnts.size(), AggregateTarget(vector<float>(num_dense_dist_), vector<pair<int,float> >()));
-    for(auto & kv : cnts.second->cnts) {
-      wids.push_back(kv.first);
-      wcnts.push_back(kv.second);
-      total_words.first += kv.second;
-      if(kv.first == 0) total_words.second += kv.second;
-    }
-    // cerr << "wids: " << print_vec(wids) << endl;
-    // cerr << "cnts: " << print_vec(wcnts) << endl;
+    DistTarget dist_trg; dist_trg.first.resize(num_dense_dist_);
+    total_words.first += kv.second;
+    if(*kv.first.rbegin() == 0) total_words.second += kv.second;
     // Calculate all of the distributions
     int dense_offset = 0, sparse_offset = 0;
     for(auto dist : dists_)
-      dist->calc_word_dists(cnts.first, wids, uniform_prob, unk_prob, trgs, dense_offset, sparse_offset);
-    // Add counts for each context
-    for(int i : boost::irange(0, (int)wids.size()))
-      data[ctxt][trgs[i]] += wcnts[i];
+      dist->calc_word_dists(kv.first, uniform_prob, unk_prob, dist_trg, dense_offset, sparse_offset);
+    // Add counts for the context
+    data[ctxt][dist_trg] += kv.second;
   } 
 
   return total_words;

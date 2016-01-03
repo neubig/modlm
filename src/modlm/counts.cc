@@ -65,25 +65,22 @@ void CountsMabs::calc_ctxt_feats(const Sentence & ctxt, float * fl) {
 }
 
 // Calculate the ctxtual features 
-void Counts::calc_word_dists(const Sentence & ctxt,
-                             const Sentence & wids,
+void Counts::calc_word_dists(const Sentence & ngram,
                              float uniform_prob,
                              float unk_prob,
-                             std::vector<AggregateTarget> & trgs,
+                             DistTarget & trg,
                              int & dense_offset) const {
+  Sentence ctxt = ngram; ctxt.resize(ctxt.size() - 1);
+  WordId wid = *ngram.rbegin();
   auto it = cnts_.find(ctxt);
   if(it == cnts_.end()) {
-    for(size_t i = 0; i < wids.size(); i++) 
-      trgs[i].first[dense_offset] = (wids[i] == 0 ? unk_prob * uniform_prob : uniform_prob);
+    trg.first[dense_offset] = (wid == 0 ? unk_prob * uniform_prob : uniform_prob);
   } else {
-    for(size_t i = 0; i < wids.size(); i++) {
-      auto wid = wids[i];
-      auto it2 = it->second->cnts.find(wid);
-      trgs[i].first[dense_offset] = (it2 != it->second->cnts.end() ?
-                                     mod_cnt(it2->second) / it->second->get_denominator() :
-                                     0.0);
-      if(wids[i] == 0) trgs[i].first[dense_offset] *= unk_prob;
-    }
+    auto it2 = it->second->cnts.find(wid);
+    trg.first[dense_offset] = (it2 != it->second->cnts.end() ?
+                               mod_cnt(it2->second) / it->second->get_denominator() :
+                               0.0);
+    if(wid == 0) trg.first[dense_offset] *= unk_prob;
   }
   dense_offset++;
 }

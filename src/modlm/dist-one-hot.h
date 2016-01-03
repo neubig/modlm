@@ -39,11 +39,10 @@ public:
   virtual size_t get_sparse_size() const override { return mapping_.size(); }
   // And calculate these features given ctxt, for words wids. uniform_prob
   // is the probability assigned in unknown ctxts.
-  virtual void calc_word_dists(const Sentence & ctxt,
-                               const Sentence & wids,
+  virtual void calc_word_dists(const Sentence & ngram,
                                float uniform_prob,
                                float unk_prob,
-                               std::vector<AggregateTarget> & trgs,
+                               DistTarget & trg,
                                int & dense_offset,
                                int & sparse_offset) const override;
 
