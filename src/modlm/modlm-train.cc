@@ -296,8 +296,8 @@ pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, Aggreg
     Sentence ctxt_words = kv.first;
     ctxt_words.resize(ctxt_words.size() - 1);
     // Calculate the words and contexts
-    for(int i = ctxt_words.size()-word_hist_; i < ctxt_words.size(); i++)
-      ctxt.second[i] = ctxt_words[ctxt_words.size()+i];
+    for(int i = 0; i < word_hist_; i++)
+      ctxt.second[i] = ctxt_words[ctxt_words.size()-word_hist_+i];
     int curr_ctxt = 0;
     for(auto dist : dists_) {
       assert(dist.get() != NULL);
