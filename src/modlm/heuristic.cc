@@ -6,27 +6,30 @@ using namespace std;
 using namespace modlm;
 
 std::vector<float> HeuristicAbs::smooth(int num_dists, const std::vector<float> & ctxts) {
-  if((num_dists-1)*4 != ctxts.size())
+  if(ctxts.size() % 4 != 0 || num_dists*4 < ctxts.size())
     THROW_ERROR("Absolute discounting heuristic expects 4 context features for each dist");
   vector<float> ret(num_dists, 0.0);
   float left = 1.0;
-  for(int i = num_dists-2; i >= 0; i--) {
+  int ngram_dists = ctxts.size()/4;
+  for(int i = ngram_dists - 1; i >= 0; i--) {
     if(ctxts[i*4] == 1.0) continue;
     // Discounted divided by total == amount for this dist
     float my_prob = exp(ctxts[i*4+3]-ctxts[i*4+1]);
     ret[i] = my_prob * left;
     left *= (1-my_prob);
   }
-  ret[num_dists - 1] = left;
+  for(int i = ngram_dists; i < num_dists; i++)
+    ret[i] = left/(num_dists-ngram_dists);
   return ret;
 }
 
 std::vector<float> HeuristicWb::smooth(int num_dists, const std::vector<float> & ctxts) {
-  if((num_dists-1)*3 != ctxts.size())
+  if(ctxts.size() % 3 != 0 || num_dists*3 < ctxts.size())
     THROW_ERROR("Witten bell heuristic expects 3 context features for each dist");
   vector<float> ret(num_dists, 0.0);
   float left = 1.0;
-  for(int i = num_dists-2; i >= 0; i--) {
+  int ngram_dists = ctxts.size()/3;
+  for(int i = ngram_dists-1; i >= 0; i--) {
     if(ctxts[i*3] == 1.0) continue;
     // Discounted divided by total == amount for this dist
     float word = exp(ctxts[i*3+1]), uniq = exp(ctxts[i*3+2]);
@@ -34,7 +37,8 @@ std::vector<float> HeuristicWb::smooth(int num_dists, const std::vector<float> &
     ret[i] = my_prob * left;
     left *= (1-my_prob);
   }
-  ret[num_dists - 1] = left;
+  for(int i = ngram_dists; i < num_dists; i++)
+    ret[i] = left/(num_dists-ngram_dists);
   return ret;
 }
 

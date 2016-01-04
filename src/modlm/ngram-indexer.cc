@@ -1,6 +1,7 @@
 #include <modlm/ngram-indexer.h>
 #include <iostream>
 #include <sstream>
+#include <cstring>
 
 using namespace modlm;
 using namespace std;
