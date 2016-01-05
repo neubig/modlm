@@ -58,12 +58,16 @@ protected:
   cnn::expr::Expression add_to_graph(const std::vector<float> & wctxt, const std::vector<WordId> & words, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, cnn::ComputationGraph & cg);
   int calc_dropout_set();
 
+  template <class Data, class Instance>
+  float calc_instance(const Data & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch);
+
+  template <class Instance>
+  cnn::expr::Expression create_graph(const Instance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, bool dropout, cnn::ComputationGraph & cg);
+
   // *** Aggregate training stuff
   void train_aggregate();
-  float calc_aggregate_instance(const IndexedAggregateData & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch);
   std::pair<int,int> create_aggregate_data(const std::string & file_name, IndexedAggregateDataMap & data);
   void convert_aggregate_data(const IndexedAggregateDataMap & data_map, IndexedAggregateData & data);
-  cnn::expr::Expression create_aggregate_graph(const IndexedAggregateInstance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, bool dropout, cnn::ComputationGraph & cg);
   void sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob);
 
   // *** Sentence-wise training stuff

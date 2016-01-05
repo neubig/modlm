@@ -18,7 +18,6 @@ typedef std::pair<int, std::vector<modlm::WordId> > IndexedAggregateContext;
 // A set of aggregate training instances
 typedef std::pair<AggregateContext, std::vector<std::pair<DistTarget, int> > > AggregateInstance;
 typedef std::vector<AggregateInstance> AggregateData;
-
-// A set of aggregate training instances
 typedef std::pair<IndexedAggregateContext, std::vector<std::pair<IndexedDistTarget, int> > > IndexedAggregateInstance;
 typedef std::vector<IndexedAggregateInstance> IndexedAggregateData;
+

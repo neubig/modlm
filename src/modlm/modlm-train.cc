@@ -158,28 +158,8 @@ int ModlmTrain::calc_dropout_set() {
   }
 }
 
-// *************** Calculation for aggregate training
-
-Expression ModlmTrain::create_aggregate_graph(const IndexedAggregateInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, bool dropout, cnn::ComputationGraph & cg) {
-  // Dynamically create the target vectors
-  int num_dist = num_dense_dist_ + num_sparse_dist_;
-  int num_words = (range.second - range.first);
-  vector<float> wdists_(num_words * num_dist, 0.0), wcnts(num_words);
-  size_t ptr = 0;
-  for(size_t pos = range.first; pos < range.second; pos++) {
-    auto & kv = inst.second[pos];
-    memcpy(&wdists_[ptr], &dist_inverter_[kv.first.first][0], sizeof(float)*num_dense_dist_);
-    ptr += num_dense_dist_;
-    for(auto & elem : kv.first.second)
-      wdists_[ptr + elem.first] = elem.second;
-    ptr += num_sparse_dist_;
-    wcnts[pos-range.first] = kv.second;
-    words.first += kv.second;
-  }
-  return add_to_graph(ctxt_inverter_[inst.first.first], inst.first.second, wdists_, wcnts, dropout, cg);
-}
-
-float ModlmTrain::calc_aggregate_instance(const IndexedAggregateData & data, const std::string & strid, std::pair<int,int> words, bool update, int epoch) {
+template <class Data, class Instance>
+float ModlmTrain::calc_instance(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, int epoch) {
   float loss = 0.0, print_every = 60.0, elapsed;
   float last_print = 0;
   Timer time;
@@ -188,7 +168,7 @@ float ModlmTrain::calc_aggregate_instance(const IndexedAggregateData & data, con
   for(auto inst : data) {
     for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
       cnn::ComputationGraph cg;
-      create_aggregate_graph(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), curr_words, update, cg);
+      create_graph<Instance>(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), curr_words, update, cg);
       loss += cnn::as_scalar(cg.forward());
       if(loss != loss) THROW_ERROR("Loss is not a number");
       if(update) {
@@ -214,6 +194,27 @@ float ModlmTrain::calc_aggregate_instance(const IndexedAggregateData & data, con
   return loss;
 }
 
+// *************** Calculation for aggregate training
+
+template <>
+Expression ModlmTrain::create_graph<IndexedAggregateInstance>(const IndexedAggregateInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, bool dropout, cnn::ComputationGraph & cg) {
+  // Dynamically create the target vectors
+  int num_dist = num_dense_dist_ + num_sparse_dist_;
+  int num_words = (range.second - range.first);
+  vector<float> wdists_(num_words * num_dist, 0.0), wcnts(num_words);
+  size_t ptr = 0;
+  for(size_t pos = range.first; pos < range.second; pos++) {
+    auto & kv = inst.second[pos];
+    memcpy(&wdists_[ptr], &dist_inverter_[kv.first.first][0], sizeof(float)*num_dense_dist_);
+    ptr += num_dense_dist_;
+    for(auto & elem : kv.first.second)
+      wdists_[ptr + elem.first] = elem.second;
+    ptr += num_sparse_dist_;
+    wcnts[pos-range.first] = kv.second;
+    words.first += kv.second;
+  }
+  return add_to_graph(ctxt_inverter_[inst.first.first], inst.first.second, wdists_, wcnts, dropout, cg);
+}
 
 void ModlmTrain::convert_aggregate_data(const IndexedAggregateDataMap & data_map, IndexedAggregateData & data) {
   data.resize(data_map.size());
@@ -228,39 +229,6 @@ void ModlmTrain::convert_aggregate_data(const IndexedAggregateDataMap & data_map
     }
     outer_it++;
   }
-}
-
-void ModlmTrain::sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob) {
-  cerr << "Performing sanity check" << endl;
-  std::unordered_set<Sentence> checked_ctxts;
-  for(const auto & my_count : my_counts.get_index()) {
-    Sentence my_ctxt(my_count.first); my_ctxt.resize(my_ctxt.size()-1);
-    if(checked_ctxts.find(my_ctxt) == checked_ctxts.end()) {
-      Sentence my_ngram(my_count.first);
-      vector<float> dist_trg_sum(num_dense_dist_);
-      for(WordId wid = 0; wid < dict_->size(); wid++) {
-        *my_ngram.rbegin() = wid;
-        std::vector<float> trg_dense(num_dense_dist_);
-        std::vector<std::pair<int, float> > trg_sparse;
-        int dense_offset = 0, sparse_offset = 0;
-        for(auto dist : dists_)
-          dist->calc_word_dists(my_ngram, uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
-        // cerr << "   " << dict_->Convert(wid) << ":";
-        for(size_t did = 0; did < num_dense_dist_; did++) {
-          dist_trg_sum[did] += trg_dense[did] / (wid == 0 ? unk_prob : 1.f);
-          // cerr << ' ' << dist_trg.first[did];
-        }
-        // cerr << endl;
-      }
-      for(size_t did = 0; did < num_dense_dist_; did++) {
-        // cerr << "Distribution " << did << " for " << PrintSentence(my_ctxt, dict_) << ": " << dist_trg_sum[did] << endl;
-        if(dist_trg_sum[did] > 1.01f || dist_trg_sum[did] < 0.99f)
-          THROW_ERROR("Distribution " << did << " for " << PrintSentence(my_ctxt, dict_) << " > 1: " << dist_trg_sum[did]);
-      }
-      checked_ctxts.insert(my_ctxt);
-    }
-  }
-  cerr << "Sanity check passed" << endl;
 }
 
 pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, IndexedAggregateDataMap & data) {
@@ -364,14 +332,8 @@ void ModlmTrain::train_aggregate() {
   ctxt_indexer_.build_inverse_index(ctxt_inverter_); ctxt_indexer_.get_index().clear();
 
   // Whiten the data if necessary
-  if(whitener_.get() != NULL) {
+  if(whitener_.get() != NULL)
     THROW_ERROR("Whitening not re-implemented yet");
-    // whitener_->calc_matrix(train_inst);
-    // whitener_->whiten(train_inst);
-    // whitener_->whiten(valid_inst);
-    // for(auto & my_inst : test_inst)
-    //   whitener_->whiten(my_inst);
-  }
 
   // Train a neural network to predict_ the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
@@ -382,9 +344,9 @@ void ModlmTrain::train_aggregate() {
       cout << ", dropout=" << min(dropout_prob_, 1.0f);
     cout << " (s=" << time_.Elapsed() << ")" << endl;
     // Perform training
-    calc_aggregate_instance(train_inst, "trn ", train_words, true, epoch);
+    calc_instance<IndexedAggregateData,IndexedAggregateInstance>(train_inst, "trn ", train_words, true, epoch);
     if(valid_inst.size() != 0) {
-      float valid_loss = calc_aggregate_instance(valid_inst, "vld ", valid_words, false, epoch);
+      float valid_loss = calc_instance<IndexedAggregateData,IndexedAggregateInstance>(valid_inst, "vld ", valid_words, false, epoch);
       if(rate_decay_ != 1.0 && last_valid < valid_loss)
         trainer_->eta0 *= rate_decay_;
       last_valid = valid_loss;
@@ -399,7 +361,7 @@ void ModlmTrain::train_aggregate() {
     }
     for(size_t i = 0; i < test_inst.size(); i++) {
       ostringstream oss;
-      calc_aggregate_instance(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
+      calc_instance<IndexedAggregateData,IndexedAggregateInstance>(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
     }
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
@@ -413,10 +375,121 @@ void ModlmTrain::train_aggregate() {
 
 }
 
-// *************** Calculation for both sentence-based and aggregate training
+// *************** Calculation for sentence-based training
 
 void ModlmTrain::train_sentencewise() {
-  THROW_ERROR("Not finished yet");
+
+  THROW_ERROR("Sentencewise not yet");
+  // // Create the testing/validation instances
+  // IndexedSentenceData train_inst, valid_inst;
+  // pair<int,int> train_words(0,0), valid_words(0,0);
+  // vector<IndexedSentenceData> test_inst(test_files_.size());
+  // vector<pair<int,int> > test_words(test_files_.size(), pair<int,int>(0,0));
+  // if(valid_file_ != "") {
+  //   cout << "Creating data for " << valid_file_ << " (s=" << time_.Elapsed() << ")" << endl;
+  //   valid_words = create_sentence_data(valid_file_, valid_inst);
+  // }
+  // for(size_t i = 0; i < test_files_.size(); i++) {
+  //   cout << "Creating data for " << test_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
+  //   test_words[i]  = create_sentence_data(test_files_[i], test_inst[i]);
+  // }
+
+  // // Create the training instances
+  // for(size_t i = 0; i < train_files_.size(); i++) {
+  //   for(size_t j = 0; j < model_locs_.size(); j++) {
+  //     if(model_locs_[j].size() != 1) {
+  //       cout << "Started reading model " << model_locs_[j][i+1] << " (s=" << time_.Elapsed() << ")" << endl;
+  //       dists_[j] = DistFactory::from_file(model_locs_[j][i+1], dict_);
+  //     }
+  //   }
+  //   cout << "Creating data for " << train_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
+  //   pair<int,int> my_words = create_sentence_data(train_files_[i], train_inst);
+  //   train_words.first += my_words.first; train_words.second += my_words.second;
+  // }
+  // dists_.clear();
+  // cout << "Done creating data. Whitening... (s=" << time_.Elapsed() << ")" << endl;
+
+  // // Now that we're done creating indexed data, invert the index
+  // dist_indexer_.build_inverse_index(dist_inverter_); dist_indexer_.get_index().clear();
+  // ctxt_indexer_.build_inverse_index(ctxt_inverter_); ctxt_indexer_.get_index().clear();
+
+  // // Whiten the data if necessary
+  // if(whitener_.get() != NULL)
+  //   THROW_ERROR("Whitening not re-implemented yet");
+
+  // // Train a neural network to predict the interpolation coefficients
+  // float last_valid = 1e99, best_valid = 1e99;
+  // for(int epoch = 1; epoch <= epochs_; epoch++) { 
+  //   // Print info about the epoch
+  //   cout << "--- Starting epoch " << epoch << ": "<<(epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer_->eta0;
+  //   if(dropout_prob_ != 0.0)
+  //     cout << ", dropout=" << min(dropout_prob_, 1.0f);
+  //   cout << " (s=" << time_.Elapsed() << ")" << endl;
+  //   // Perform training
+  //   calc_sentence_instance(train_inst, "trn ", train_words, true, epoch);
+  //   if(valid_inst.size() != 0) {
+  //     float valid_loss = calc_sentence_instance(valid_inst, "vld ", valid_words, false, epoch);
+  //     if(rate_decay_ != 1.0 && last_valid < valid_loss)
+  //       trainer_->eta0 *= rate_decay_;
+  //     last_valid = valid_loss;
+  //     // Open the output model
+  //     if(best_valid > valid_loss && model_out_file_ != "") {
+  //       ofstream out(model_out_file_.c_str());
+  //       if(!out) THROW_ERROR("Could not open output file: " << model_out_file_);
+  //       boost::archive::text_oarchive oa(out);
+  //       oa << *mod_;
+  //       best_valid = valid_loss;
+  //     }
+  //   }
+  //   for(size_t i = 0; i < test_inst.size(); i++) {
+  //     ostringstream oss;
+  //     calc_sentence_instance(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
+  //   }
+  //   // Reset the trainer after online learning
+  //   if(epoch == online_epochs_) {
+  //     trainer_ = get_trainer(trainer_id_, learning_rate_, *mod_);
+  //     trainer_->clipping_enabled = clipping_enabled_;
+  //   }
+  //   dropout_prob_ *= dropout_prob_decay_;
+  // }
+
+  // cout << "Done training! (s=" << time_.Elapsed() << ")" << endl;
+
+}
+
+// *************** Sanity check code
+
+void ModlmTrain::sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob) {
+  cerr << "Performing sanity check" << endl;
+  std::unordered_set<Sentence> checked_ctxts;
+  for(const auto & my_count : my_counts.get_index()) {
+    Sentence my_ctxt(my_count.first); my_ctxt.resize(my_ctxt.size()-1);
+    if(checked_ctxts.find(my_ctxt) == checked_ctxts.end()) {
+      Sentence my_ngram(my_count.first);
+      vector<float> dist_trg_sum(num_dense_dist_);
+      for(WordId wid = 0; wid < dict_->size(); wid++) {
+        *my_ngram.rbegin() = wid;
+        std::vector<float> trg_dense(num_dense_dist_);
+        std::vector<std::pair<int, float> > trg_sparse;
+        int dense_offset = 0, sparse_offset = 0;
+        for(auto dist : dists_)
+          dist->calc_word_dists(my_ngram, uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
+        // cerr << "   " << dict_->Convert(wid) << ":";
+        for(size_t did = 0; did < num_dense_dist_; did++) {
+          dist_trg_sum[did] += trg_dense[did] / (wid == 0 ? unk_prob : 1.f);
+          // cerr << ' ' << dist_trg.first[did];
+        }
+        // cerr << endl;
+      }
+      for(size_t did = 0; did < num_dense_dist_; did++) {
+        // cerr << "Distribution " << did << " for " << PrintSentence(my_ctxt, dict_) << ": " << dist_trg_sum[did] << endl;
+        if(dist_trg_sum[did] > 1.01f || dist_trg_sum[did] < 0.99f)
+          THROW_ERROR("Distribution " << did << " for " << PrintSentence(my_ctxt, dict_) << " > 1: " << dist_trg_sum[did]);
+      }
+      checked_ctxts.insert(my_ctxt);
+    }
+  }
+  cerr << "Sanity check passed" << endl;
 }
 
 // *************** Calculation for both sentence-based and aggregate training
