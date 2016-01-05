@@ -2,9 +2,11 @@
 #include <sstream>
 #include <modlm/sequence-indexer.h>
 #include <modlm/macros.h>
+#include <cstring>
 
-using namespace modlm;
 using namespace std;
+
+namespace modlm {
 
 template<>
 SequenceIndexer<Sentence>::SequenceIndexer(size_t len) : len_(len), byte_len_(len * sizeof(Sentence::value_type)) { }
@@ -58,8 +60,6 @@ void SequenceIndexer<Key>::build_inverse_index(std::vector<Key> & inverse) {
   for(auto & kv : indx_)
     inverse[kv.second] = kv.first;
 }
-
-namespace modlm {
 
 template class SequenceIndexer<Sentence>;
 template class SequenceIndexer<vector<float> >;
