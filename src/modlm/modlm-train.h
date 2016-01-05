@@ -8,6 +8,7 @@
 #include <modlm/training-data.h>
 #include <modlm/hashes.h>
 #include <modlm/sequence-indexer.h>
+#include <modlm/builder-factory.h>
 
 namespace cnn {
   class Model;
@@ -97,10 +98,10 @@ protected:
   HeuristicPtr heuristic_;
   WhitenerPtr whitener_;
   TrainerPtr trainer_;
+  BuilderSpec hidden_spec_;
 
   cnn::LookupParameters* reps_;
-  std::vector<cnn::Parameters*> Ws_;
-  std::vector<cnn::Parameters*> bs_;
+  BuilderPtr builder_;
   cnn::Parameters* V_;
   cnn::Parameters* a_;
 
@@ -121,8 +122,6 @@ protected:
   std::vector<std::vector<std::string> > model_locs_;
   std::vector<std::string> train_files_, test_files_;
   std::string valid_file_;
-
-  BuilderPtr builder_;
 
   SequenceIndexer<std::vector<float> > dist_indexer_, ctxt_indexer_;
   std::vector<std::vector<float> > dist_inverter_, ctxt_inverter_;

@@ -9,10 +9,11 @@ class Model;
 struct RNNBuilder;
 }
 
-namespace lamtram {
+namespace modlm {
 
 class BuilderSpec {
 public:
+    BuilderSpec() : type(""), nodes(-1), layers(-1) { }
     BuilderSpec(const std::string & str);
     std::string type;
     int nodes, layers;

@@ -1,0 +1,54 @@
+#pragma once
+
+#include <cnn/rnn.h>
+#include <cnn/cnn.h>
+#include <cnn/rnn-state-machine.h>
+#include <cnn/expr.h>
+
+using namespace cnn::expr;
+
+namespace cnn {
+
+class Model;
+
+struct FFBuilder : public RNNBuilder {
+  FFBuilder() = default;
+  explicit FFBuilder(unsigned layers,
+                     unsigned input_dim,
+                     unsigned hidden_dim,
+                     Model* model);
+
+ protected:
+  void new_graph_impl(ComputationGraph& cg) override;
+  void start_new_sequence_impl(const std::vector<Expression>& h_0) override;
+  Expression add_input_impl(int prev, const Expression& x) override;
+
+ public:
+  Expression add_auxiliary_input(const Expression& x, const Expression &aux);
+
+  Expression back() const override { return h0.back(); }
+  std::vector<Expression> final_h() const override { return h0; }
+  std::vector<Expression> final_s() const override { return final_h(); }
+
+  std::vector<Expression> get_h(RNNPointer i) const override { return h0; }
+  std::vector<Expression> get_s(RNNPointer i) const override { return get_h(i); }
+  void copy(const RNNBuilder & params) override;
+
+  unsigned num_h0_components() const override { return 0; }
+
+ private:
+  // first index is layer, then x2h h2h hb
+  std::vector<std::vector<Parameters*>> params;
+
+  // first index is layer, then x2h h2h hb
+  std::vector<std::vector<Expression>> param_vars;
+
+  // initial value of h
+  // defaults to zero matrix input
+  std::vector<Expression> h0;
+
+  unsigned layers;
+};
+
+} // namespace cnn
+

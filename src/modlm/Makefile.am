@@ -13,6 +13,7 @@ LIBCPP = \
   dist-uniform.cc \
   dist-unk.cc \
   sequence-indexer.cc \
+  ff-builder.cc \
   heuristic.cc \
   input-file-stream.cc \
   timer.cc \

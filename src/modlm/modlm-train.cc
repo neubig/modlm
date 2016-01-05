@@ -12,6 +12,7 @@
 #include <cnn/cnn.h>
 #include <cnn/dict.h>
 #include <cnn/training.h>
+#include <cnn/rnn.h>
 #include <modlm/modlm-train.h>
 #include <modlm/macros.h>
 #include <modlm/timer.h>
@@ -94,8 +95,6 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
                                     const vector<float> & out_cnts,
                                     bool dropout,
                                     cnn::ComputationGraph & cg) {
-  if(builder_.get() != NULL)
-    THROW_ERROR("Recurrent nets are not supported yet");
   // Load the targets
   int num_dist = num_sparse_dist_ + num_dense_dist_;
   int num_words = out_cnts.size();
@@ -134,8 +133,8 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
       expr_cat.push_back(lookup(cg, reps_, ctxt_words[i]));
     h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
   }
-  for(size_t i = 0; i < Ws_.size(); i++)
-    h = tanh( parameter(cg, Ws_[i]) * h + parameter(cg, bs_[i]) );
+
+  h = builder_->add_input(h);
 
   Expression softmax_input = parameter(cg, V_) * h + parameter(cg, a_);
   // Calculate which interpolation coefficients to use
@@ -146,6 +145,10 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
                        exp( log_softmax( softmax_input, dropout_spans_[dropout_set] ) ));
   Expression nlprob = -log(transpose(probs) * interp);
   Expression nll = transpose(counts) * nlprob;
+
+  // cg.PrintGraphviz();
+  // exit(1);
+
   return nll;
 }
 
@@ -155,6 +158,8 @@ float ModlmTrain::calc_instance<IndexedAggregateInstance>(const IndexedAggregate
   float loss = 0.f;
   for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
     cnn::ComputationGraph cg;
+    builder_->new_graph(cg);
+    builder_->start_new_sequence();
     // Dynamically create the target vectors
     pair<int,int> range(i, min(inst.second.size(), i+max_minibatch_));
     int num_words = (range.second - range.first);
@@ -186,6 +191,8 @@ template <>
 float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceInstance & inst, bool update, int epoch, pair<int,int> & words) {
   int num_dist = num_dense_dist_ + num_sparse_dist_;
   cnn::ComputationGraph cg;
+  builder_->new_graph(cg);
+  builder_->start_new_sequence();
   vector<float> wcnts(1, 1.f);
   Sentence ctxt_ngram(word_hist_, 1);
   std::vector<Expression> loss_exps;
@@ -525,7 +532,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("weight_decay", po::value<float>()->default_value(1e-6), "How much weight decay to perform")
       ("epochs", po::value<int>()->default_value(300), "Number of epochs")
       ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
-      ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
+      ("layers", po::value<string>()->default_value("ff:50:1"), "Descriptor for hidden layers in format type(ff/rnn/lstm):nodes:layers")
       ("learning_rate", po::value<float>()->default_value(0.1), "Learning rate")
       ("max_minibatch", po::value<int>()->default_value(256), "Max minibatch size")
       ("model_in", po::value<string>()->default_value(""), "If resuming training, read the model in")
@@ -590,9 +597,11 @@ int ModlmTrain::main(int argc, char** argv) {
     whitener_.reset(new Whitener(vm["whiten"].as<string>(), vm["whiten_eps"].as<float>()));
 
   // Calculate the number of layers
-  boost::split(strs, vm["layers"].as<string>(), boost::is_any_of(" "));
-  vector<int> hidden_size;
-  for(auto str : strs) if(str != "") hidden_size.push_back(stoi(str));
+  hidden_spec_ = BuilderSpec(vm["layers"].as<string>());
+  if(hidden_spec_.type != "ff" && training_type_ == "agg")
+    THROW_ERROR("Only feed-forward networks can be used with aggregated training");
+
+  // Calculate dropout
   boost::split(strs, vm["dropout_models"].as<string>(), boost::is_any_of(" "));
   vector<set<int> > dropout_models;
   for(auto str : strs) if(str != "") {
@@ -690,11 +699,9 @@ int ModlmTrain::main(int argc, char** argv) {
     // Add the word representation and transformation functions
     if(word_hist_ != 0)
       reps_ = mod_->add_lookup_parameters(dict_->size(), {(unsigned int)word_rep_});
-    // Add the functions
-    for(auto size : hidden_size) {
-      Ws_.push_back(mod_->add_parameters({(unsigned int)size, (unsigned int)last_size}));
-      bs_.push_back(mod_->add_parameters({(unsigned int)size}));
-      last_size = size;
+    if(hidden_spec_.layers != 0) {
+      builder_ = BuilderFactory::CreateBuilder(hidden_spec_, last_size, *mod_);
+      last_size = hidden_spec_.nodes;
     }
     V_ = mod_->add_parameters({(unsigned int)num_dist, (unsigned int)last_size});
   }
