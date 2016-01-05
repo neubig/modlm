@@ -24,9 +24,10 @@
 #include <modlm/input-file-stream.h>
 
 using namespace std;
-using namespace modlm;
 using namespace cnn::expr;
 namespace po = boost::program_options;
+
+namespace modlm {
 
 // *************** Auxiliary functions
 
@@ -704,5 +705,7 @@ int ModlmTrain::main(int argc, char** argv) {
   }
 
   return 0;
+
+}
 
 }
