@@ -11,8 +11,9 @@ DistUniform::DistUniform(const std::string & sig) : DistBase(sig) {
 void DistUniform::calc_word_dists(const Sentence & ngram,
                                   float uniform_prob,
                                   float unk_prob,
-                                  DistTarget & trg,
+                                  std::vector<float> & trg_dense,
                                   int & dense_offset,
+                                  std::vector<std::pair<int,float> > & trg_sparse,
                                   int & sparse_offset) const {
-  trg.first[dense_offset++] = (*ngram.rbegin() == 0 ? uniform_prob * unk_prob : uniform_prob);
+  trg_dense[dense_offset++] = (*ngram.rbegin() == 0 ? uniform_prob * unk_prob : uniform_prob);
 }

@@ -49,15 +49,16 @@ void DistOneHot::calc_ctxt_feats(const Sentence & ctxt, float* feats_out) const 
 // words. trg is the output, and dense_offset and sparse_offset offset the dense
 // and sparse distributions respectively.
 void DistOneHot::calc_word_dists(const Sentence & ngram,
-                                 float uniform_prob,
-                                 float unk_prob,
-                                 DistTarget & trg,
-                                 int & dense_offset,
-                                 int & sparse_offset) const {
+                                float uniform_prob,
+                                float unk_prob,
+                                std::vector<float> & trg_dense,
+                                int & dense_offset,
+                                std::vector<std::pair<int,float> > & trg_sparse,
+                                int & sparse_offset) const {
   WordId wid = *ngram.rbegin();
   auto it = mapping_.find(wid);
   if(it != mapping_.end())
-    trg.second.push_back(make_pair(sparse_offset+it->second-1, (wid == 0 ? unk_prob : 1.0)));
+    trg_sparse.push_back(make_pair(sparse_offset+it->second-1, (wid == 0 ? unk_prob : 1.0)));
   sparse_offset += mapping_.size();
 }
 

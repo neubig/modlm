@@ -7,7 +7,8 @@
 
 namespace modlm {
 
-class NgramIndexer {
+template <class Key>
+class SequenceIndexer {
 public:
 
   // typedef cedar::da<int, -1, -2, false> cedar_t;
@@ -20,47 +21,52 @@ public:
   //       first.resize(len/sizeof(WordId));
   //     }
   //   }
-  //   Sentence first;
+  //   Key first;
   //   int second;
   // };
 
   // struct iterator {
   //   public:
   //     iterator(int val, size_t from, size_t len, cedar_t & indx) : val_(val,from,len,indx), from_(from), len_(len), indx_(&indx) { } 
-  //     NgramIndexer::iterator & operator++() {
+  //     SequenceIndexer::iterator & operator++() {
   //       val_.second = indx_->next(from_, len_);
   //       if(val_.second != cedar_t::CEDAR_NO_PATH)
   //         val_ = value_type(val_.second, from_, len_, *indx_);
   //       return *this;
   //     }
-  //     NgramIndexer::value_type & operator*() { return val_; }
-  //     bool operator==(const NgramIndexer::iterator & it) const {
+  //     SequenceIndexer::value_type & operator*() { return val_; }
+  //     bool operator==(const SequenceIndexer::iterator & it) const {
   //       return val_.second==it.val_.second && from_==it.from_ && len_==it.len_ && indx_==it.indx_;
   //     }
-  //     bool operator!=(const NgramIndexer::iterator & it) const { return !(*this == it); }
+  //     bool operator!=(const SequenceIndexer::iterator & it) const { return !(*this == it); }
   //   protected:
-  //     NgramIndexer::value_type val_;
+  //     SequenceIndexer::value_type val_;
   //     size_t from_, len_;
   //     cedar_t *indx_;
   // };
 
-  // NgramIndexer::iterator begin() { 
+  // SequenceIndexer::iterator begin() { 
   //   size_t from = 0, len = 0;
   //   int val = indx_.begin(from,len);
   //   if(val == cedar_t::CEDAR_NO_PATH) { from = 0; len = 0; }
-  //   return NgramIndexer::iterator(val, from, len, indx_);
+  //   return SequenceIndexer::iterator(val, from, len, indx_);
   // }
-  // NgramIndexer::iterator end() { return NgramIndexer::iterator(cedar_t::CEDAR_NO_PATH, 0, 0, indx_); }
+  // SequenceIndexer::iterator end() { return SequenceIndexer::iterator(cedar_t::CEDAR_NO_PATH, 0, 0, indx_); }
 
-  NgramIndexer(size_t len) : len_(len), byte_len_(len * sizeof(WordId)) { }
-  void add_counts(const Sentence & sent);
+  SequenceIndexer(size_t len);
+  void add_counts(const Key & sent);
+  void add_count(const Key & sent);
+  int get_index(const Key & sent, bool allow_new);
+  void build_inverse_index(std::vector<Key> & inverse);
+  
+  
 
-  std::unordered_map<Sentence, int> & get_index() { return indx_; }
-  const std::unordered_map<Sentence, int> & get_index() const { return indx_; }
+  std::unordered_map<Key, int> & get_index() { return indx_; }
+  const std::unordered_map<Key, int> & get_index() const { return indx_; }
 
 protected:
   size_t len_, byte_len_;
-  std::unordered_map<Sentence, int> indx_;
+  std::unordered_map<Key, int> indx_;
   // cedar_t indx_;
 };
 

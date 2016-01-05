@@ -14,7 +14,7 @@ namespace modlm {
 // A training target, where:
 // * first is a dense vector of distributions
 // * second is a sparse vector of distributions
-typedef std::pair<std::vector<float>, std::vector<std::pair<int, float> > > DistTarget;
+// typedef std::pair<std::vector<float>, std::vector<std::pair<int, float> > > DistTarget;
 
 typedef std::shared_ptr<cnn::Dict> DictPtr;
 
@@ -56,8 +56,9 @@ public:
   virtual void calc_word_dists(const Sentence & ngram,
                                float uniform_prob,
                                float unk_prob,
-                               DistTarget & trg,
+                               std::vector<float> & trg_dense,
                                int & dense_offset,
+                               std::vector<std::pair<int,float> > & trg_sparse,
                                int & sparse_offset) const = 0;
 
   // Read/write model. If dict is null, use numerical ids, otherwise strings.

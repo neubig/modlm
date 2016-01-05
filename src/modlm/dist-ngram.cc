@@ -219,8 +219,9 @@ void DistNgram::calc_ctxt_feats(const Sentence & ctxt, float* feats_out) const {
 void DistNgram::calc_word_dists(const Sentence & ngram,
                                 float uniform_prob,
                                 float unk_prob,
-                                DistTarget & trg,
+                                std::vector<float> & trg_dense,
                                 int & dense_offset,
+                                std::vector<std::pair<int,float> > & trg_sparse,
                                 int & sparse_offset) const {
   float base_prob = (*ngram.rbegin() != 0 ? 1.0 : unk_prob);
   Sentence this_ngram(1, *ngram.rbegin()), this_ctxt;
@@ -230,16 +231,16 @@ void DistNgram::calc_word_dists(const Sentence & ngram,
     if(ngram_it == mapping_.end()) {
       float my_prob = (context_it != mapping_.end() ? 0.0 : uniform_prob * base_prob);
       // cerr << "my_prob: " << my_prob << endl;
-      trg.first[dense_offset++] = my_prob;
+      trg_dense[dense_offset++] = my_prob;
     } else {
       assert(context_it != mapping_.end());
       int value = (j == 0 ? ngram_it->second : ctxt_cnts_[ngram_it->second].first);
       if(smoothing_ == SMOOTH_MABS || smoothing_ == SMOOTH_MKN) {
         // cerr << "value: " << (value-discounts_[this_ctxt.size()][min(value,3)]) << "/" << disc_ctxt_cnts_[context_it->second] * base_prob << endl;
-        trg.first[dense_offset++] = (value-discounts_[this_ctxt.size()][min(value,3)])/disc_ctxt_cnts_[context_it->second] * base_prob;
+        trg_dense[dense_offset++] = (value-discounts_[this_ctxt.size()][min(value,3)])/disc_ctxt_cnts_[context_it->second] * base_prob;
       } else {
         // cerr << "value: " << value << "/" << (float)ctxt_cnts_[context_it->second].second * base_prob << endl;
-        trg.first[dense_offset++] = value/(float)ctxt_cnts_[context_it->second].second * base_prob;
+        trg_dense[dense_offset++] = value/(float)ctxt_cnts_[context_it->second].second * base_prob;
       }
     }
     if(j != 0) {

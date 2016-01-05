@@ -20,7 +20,7 @@
 #include <modlm/dict-utils.h>
 #include <modlm/whitener.h>
 #include <modlm/heuristic.h>
-#include <modlm/ngram-indexer.h>
+#include <modlm/sequence-indexer.h>
 #include <modlm/input-file-stream.h>
 
 using namespace std;
@@ -160,7 +160,7 @@ int ModlmTrain::calc_dropout_set() {
 
 // *************** Calculation for aggregate training
 
-Expression ModlmTrain::create_aggregate_graph(const AggregateInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, bool dropout, cnn::ComputationGraph & cg) {
+Expression ModlmTrain::create_aggregate_graph(const IndexedAggregateInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, bool dropout, cnn::ComputationGraph & cg) {
   // Dynamically create the target vectors
   int num_dist = num_dense_dist_ + num_sparse_dist_;
   int num_words = (range.second - range.first);
@@ -168,7 +168,7 @@ Expression ModlmTrain::create_aggregate_graph(const AggregateInstance & inst, pa
   size_t ptr = 0;
   for(size_t pos = range.first; pos < range.second; pos++) {
     auto & kv = inst.second[pos];
-    memcpy(&wdists_[ptr], &kv.first.first[0], sizeof(float)*num_dense_dist_);
+    memcpy(&wdists_[ptr], &dist_inverter_[kv.first.first][0], sizeof(float)*num_dense_dist_);
     ptr += num_dense_dist_;
     for(auto & elem : kv.first.second)
       wdists_[ptr + elem.first] = elem.second;
@@ -176,10 +176,10 @@ Expression ModlmTrain::create_aggregate_graph(const AggregateInstance & inst, pa
     wcnts[pos-range.first] = kv.second;
     words.first += kv.second;
   }
-  return add_to_graph(inst.first.first, inst.first.second, wdists_, wcnts, dropout, cg);
+  return add_to_graph(ctxt_inverter_[inst.first.first], inst.first.second, wdists_, wcnts, dropout, cg);
 }
 
-float ModlmTrain::calc_aggregate_instance(const AggregateData & data, const std::string & strid, std::pair<int,int> words, bool update, int epoch) {
+float ModlmTrain::calc_aggregate_instance(const IndexedAggregateData & data, const std::string & strid, std::pair<int,int> words, bool update, int epoch) {
   float loss = 0.0, print_every = 60.0, elapsed;
   float last_print = 0;
   Timer time;
@@ -215,7 +215,7 @@ float ModlmTrain::calc_aggregate_instance(const AggregateData & data, const std:
 }
 
 
-void ModlmTrain::convert_aggregate_data(const AggregateDataMap & data_map, AggregateData & data) {
+void ModlmTrain::convert_aggregate_data(const IndexedAggregateDataMap & data_map, IndexedAggregateData & data) {
   data.resize(data_map.size());
   auto outer_it = data.begin();
   for(auto & dm : data_map) {
@@ -230,7 +230,7 @@ void ModlmTrain::convert_aggregate_data(const AggregateDataMap & data_map, Aggre
   }
 }
 
-void ModlmTrain::sanity_check_aggregate(const NgramIndexer & my_counts, float uniform_prob, float unk_prob) {
+void ModlmTrain::sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob) {
   cerr << "Performing sanity check" << endl;
   std::unordered_set<Sentence> checked_ctxts;
   for(const auto & my_count : my_counts.get_index()) {
@@ -240,13 +240,14 @@ void ModlmTrain::sanity_check_aggregate(const NgramIndexer & my_counts, float un
       vector<float> dist_trg_sum(num_dense_dist_);
       for(WordId wid = 0; wid < dict_->size(); wid++) {
         *my_ngram.rbegin() = wid;
-        DistTarget dist_trg; dist_trg.first.resize(num_dense_dist_);
+        std::vector<float> trg_dense(num_dense_dist_);
+        std::vector<std::pair<int, float> > trg_sparse;
         int dense_offset = 0, sparse_offset = 0;
         for(auto dist : dists_)
-          dist->calc_word_dists(my_ngram, uniform_prob, unk_prob, dist_trg, dense_offset, sparse_offset);
+          dist->calc_word_dists(my_ngram, uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
         // cerr << "   " << dict_->Convert(wid) << ":";
         for(size_t did = 0; did < num_dense_dist_; did++) {
-          dist_trg_sum[did] += dist_trg.first[did] / (wid == 0 ? unk_prob : 1.f);
+          dist_trg_sum[did] += trg_dense[did] / (wid == 0 ? unk_prob : 1.f);
           // cerr << ' ' << dist_trg.first[did];
         }
         // cerr << endl;
@@ -262,13 +263,13 @@ void ModlmTrain::sanity_check_aggregate(const NgramIndexer & my_counts, float un
   cerr << "Sanity check passed" << endl;
 }
 
-pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, AggregateDataMap & data) {
+pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, IndexedAggregateDataMap & data) {
 
   float uniform_prob = 1.0/dict_->size();
   float unk_prob = (penalize_unk_ ? uniform_prob : 1);
   
   // Calculate n-gram counts with a profile
-  NgramIndexer my_counts(max_ctxt_+1);
+  SequenceIndexer<Sentence> my_counts(max_ctxt_+1);
 
   // Load counts
   {
@@ -287,9 +288,8 @@ pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, Aggreg
   // Create training data (num words, ctxt features, each model, true counts)
   pair<int,int> total_words(0,0);
   // Create and allocate the targets:
-  AggregateContext ctxt;
-  ctxt.first.resize(num_ctxt_);
-  ctxt.second.resize(word_hist_);
+  std::vector<float> ctxt_dense(num_ctxt_);
+  std::vector<WordId> ctxt_sparse(word_hist_);
   // Loop through each of the contexts
   for(auto & kv : my_counts.get_index()) {
     // Create a vector containing only the context words
@@ -297,23 +297,26 @@ pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, Aggreg
     ctxt_words.resize(ctxt_words.size() - 1);
     // Calculate the words and contexts
     for(int i = 0; i < word_hist_; i++)
-      ctxt.second[i] = ctxt_words[ctxt_words.size()-word_hist_+i];
+      ctxt_sparse[i] = ctxt_words[ctxt_words.size()-word_hist_+i];
     int curr_ctxt = 0;
     for(auto dist : dists_) {
       assert(dist.get() != NULL);
-      dist->calc_ctxt_feats(ctxt_words, &ctxt.first[curr_ctxt]);
+      dist->calc_ctxt_feats(ctxt_words, &ctxt_dense[curr_ctxt]);
       curr_ctxt += dist->get_ctxt_size();
     }
     // Prepare the pointers for each word
-    DistTarget dist_trg; dist_trg.first.resize(num_dense_dist_);
+    std::vector<float> trg_dense(num_dense_dist_);
+    std::vector<std::pair<int,float> > trg_sparse;
     total_words.first += kv.second;
     if(*kv.first.rbegin() == 0) total_words.second += kv.second;
     // Calculate all of the distributions
     int dense_offset = 0, sparse_offset = 0;
     for(auto dist : dists_)
-      dist->calc_word_dists(kv.first, uniform_prob, unk_prob, dist_trg, dense_offset, sparse_offset);
+      dist->calc_word_dists(kv.first, uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
     // Add counts for the context
-    data[ctxt][dist_trg] += kv.second;
+    IndexedAggregateContext full_ctxt(ctxt_indexer_.get_index(ctxt_dense, true), ctxt_sparse);
+    IndexedDistTarget full_trg(dist_indexer_.get_index(trg_dense, true), trg_sparse);
+    data[full_ctxt][full_trg] += kv.second;
   } 
 
   return total_words;
@@ -322,11 +325,11 @@ pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, Aggreg
 void ModlmTrain::train_aggregate() {
 
   // Create the testing/validation instances
-  AggregateData train_inst, valid_inst;
+  IndexedAggregateData train_inst, valid_inst;
   pair<int,int> train_words(0,0), valid_words(0,0);
-  vector<AggregateData> test_inst(test_files_.size());
+  vector<IndexedAggregateData> test_inst(test_files_.size());
   vector<pair<int,int> > test_words(test_files_.size(), pair<int,int>(0,0));
-  AggregateDataMap data_map;
+  IndexedAggregateDataMap data_map;
   if(valid_file_ != "") {
     cout << "Creating data for " << valid_file_ << " (s=" << time_.Elapsed() << ")" << endl;
     valid_words = create_aggregate_data(valid_file_, data_map);
@@ -356,13 +359,18 @@ void ModlmTrain::train_aggregate() {
   dists_.clear();
   cout << "Done creating data. Whitening... (s=" << time_.Elapsed() << ")" << endl;
 
+  // Now that we're done creating indexed data, invert the index
+  dist_indexer_.build_inverse_index(dist_inverter_); dist_indexer_.get_index().clear();
+  ctxt_indexer_.build_inverse_index(ctxt_inverter_); ctxt_indexer_.get_index().clear();
+
   // Whiten the data if necessary
   if(whitener_.get() != NULL) {
-    whitener_->calc_matrix(train_inst);
-    whitener_->whiten(train_inst);
-    whitener_->whiten(valid_inst);
-    for(auto & my_inst : test_inst)
-      whitener_->whiten(my_inst);
+    THROW_ERROR("Whitening not re-implemented yet");
+    // whitener_->calc_matrix(train_inst);
+    // whitener_->whiten(train_inst);
+    // whitener_->whiten(valid_inst);
+    // for(auto & my_inst : test_inst)
+    //   whitener_->whiten(my_inst);
   }
 
   // Train a neural network to predict_ the interpolation coefficients
@@ -408,7 +416,7 @@ void ModlmTrain::train_aggregate() {
 // *************** Calculation for both sentence-based and aggregate training
 
 void ModlmTrain::train_sentencewise() {
-  THROW_ERROR("Sentence-wise training not implemented yet");
+  THROW_ERROR("Not finished yet");
 }
 
 // *************** Calculation for both sentence-based and aggregate training

@@ -12,7 +12,7 @@ LIBCPP = \
   dist-one-hot.cc \
   dist-uniform.cc \
   dist-unk.cc \
-  ngram-indexer.cc \
+  sequence-indexer.cc \
   heuristic.cc \
   input-file-stream.cc \
   timer.cc \

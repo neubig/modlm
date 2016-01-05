@@ -7,6 +7,7 @@
 #include <modlm/timer.h>
 #include <modlm/aggregate-data.h>
 #include <modlm/hashes.h>
+#include <modlm/sequence-indexer.h>
 
 namespace cnn {
   class Model;
@@ -33,17 +34,17 @@ class DistBase;
 typedef std::shared_ptr<DistBase> DistPtr;
 typedef std::shared_ptr<cnn::Dict> DictPtr;
 typedef std::shared_ptr<cnn::RNNBuilder> BuilderPtr;
-class NgramIndexer;
 
 // A data structure for aggregate training instances
-typedef std::unordered_map<AggregateContext, std::unordered_map<DistTarget, int> > AggregateDataMap;
+typedef std::pair<int, std::vector<std::pair<int,float> > > IndexedDistTarget;
+typedef std::unordered_map<IndexedAggregateContext, std::unordered_map<IndexedDistTarget, int> > IndexedAggregateDataMap;
 
 class ModlmTrain {
 private:
   typedef std::shared_ptr<cnn::Trainer> TrainerPtr;
 
 public:
-  ModlmTrain() : num_ctxt_(0), num_dense_dist_(0), num_sparse_dist_(0), word_hist_(0), word_rep_(50), use_context_(true) { }
+  ModlmTrain() : num_ctxt_(0), num_dense_dist_(0), num_sparse_dist_(0), word_hist_(0), word_rep_(50), use_context_(true), dist_indexer_(-1), ctxt_indexer_(-1) { }
 
   TrainerPtr get_trainer(const std::string & trainer_id, float learning_rate, cnn::Model & model);
 
@@ -59,11 +60,11 @@ protected:
 
   // *** Aggregate training stuff
   void train_aggregate();
-  float calc_aggregate_instance(const AggregateData & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch);
-  std::pair<int,int> create_aggregate_data(const std::string & file_name, AggregateDataMap & data);
-  void convert_aggregate_data(const AggregateDataMap & data_map, AggregateData & data);
-  cnn::expr::Expression create_aggregate_graph(const AggregateInstance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, bool dropout, cnn::ComputationGraph & cg);
-  void sanity_check_aggregate(const NgramIndexer & my_counts, float uniform_prob, float unk_prob);
+  float calc_aggregate_instance(const IndexedAggregateData & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch);
+  std::pair<int,int> create_aggregate_data(const std::string & file_name, IndexedAggregateDataMap & data);
+  void convert_aggregate_data(const IndexedAggregateDataMap & data_map, IndexedAggregateData & data);
+  cnn::expr::Expression create_aggregate_graph(const IndexedAggregateInstance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, bool dropout, cnn::ComputationGraph & cg);
+  void sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob);
 
   // *** Sentence-wise training stuff
   void train_sentencewise();
@@ -100,12 +101,14 @@ protected:
   float dropout_prob_, dropout_prob_decay_;
   std::vector<std::vector<unsigned> > dropout_spans_;
 
-
   std::vector<std::vector<std::string> > model_locs_;
   std::vector<std::string> train_files_, test_files_;
   std::string valid_file_;
 
   BuilderPtr builder_;
+
+  SequenceIndexer<std::vector<float> > dist_indexer_, ctxt_indexer_;
+  std::vector<std::vector<float> > dist_inverter_, ctxt_inverter_;
 
 };
 
