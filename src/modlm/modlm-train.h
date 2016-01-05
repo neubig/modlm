@@ -46,7 +46,7 @@ private:
 public:
   ModlmTrain() : num_ctxt_(0), num_dense_dist_(0), num_sparse_dist_(0), word_hist_(0), word_rep_(50), use_context_(true), dist_indexer_(-1), ctxt_indexer_(-1) { }
 
-  TrainerPtr get_trainer(const std::string & trainer_id, float learning_rate, cnn::Model & model);
+  TrainerPtr get_trainer(const std::string & trainer_id, float learning_rate, float weight_decay, cnn::Model & model);
 
   int main(int argc, char** argv);
   
@@ -115,6 +115,7 @@ protected:
   bool clipping_enabled_;
   bool hold_out_;
   float dropout_prob_, dropout_prob_decay_;
+  float weight_decay_;
   std::vector<std::vector<unsigned> > dropout_spans_;
 
   std::vector<std::vector<std::string> > model_locs_;

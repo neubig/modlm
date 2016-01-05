@@ -64,20 +64,20 @@ inline std::vector<std::string> split_wildcarded(const std::string & str, const 
   return ret;
 }
 
-ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float learning_rate, cnn::Model & model) {
+ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float learning_rate, float weight_decay, cnn::Model & model) {
     TrainerPtr trainer;
     if(trainer_id == "sgd") {
-        trainer.reset(new cnn::SimpleSGDTrainer(&model, 1e-6, learning_rate));
+        trainer.reset(new cnn::SimpleSGDTrainer(&model, weight_decay, learning_rate));
     } else if(trainer_id == "momentum") {
-        trainer.reset(new cnn::MomentumSGDTrainer(&model, 1e-6, learning_rate));
+        trainer.reset(new cnn::MomentumSGDTrainer(&model, weight_decay, learning_rate));
     } else if(trainer_id == "adagrad") {
-        trainer.reset(new cnn::AdagradTrainer(&model, 1e-6, learning_rate));
+        trainer.reset(new cnn::AdagradTrainer(&model, weight_decay, learning_rate));
     } else if(trainer_id == "adadelta") {
-        trainer.reset(new cnn::AdadeltaTrainer(&model, 1e-6, learning_rate));
+        trainer.reset(new cnn::AdadeltaTrainer(&model, weight_decay, learning_rate));
     } else if(trainer_id == "adam") {
-        trainer.reset(new cnn::AdamTrainer(&model, 1e-6, learning_rate));
+        trainer.reset(new cnn::AdamTrainer(&model, weight_decay, learning_rate));
     } else if(trainer_id == "rms") {
-        trainer.reset(new cnn::RmsPropTrainer(&model, 1e-6, learning_rate));
+        trainer.reset(new cnn::RmsPropTrainer(&model, weight_decay, learning_rate));
     } else {
         THROW_ERROR("Illegal trainer variety: " << trainer_id);
     }
@@ -459,7 +459,7 @@ void ModlmTrain::perform_training() {
     }
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
-      trainer_ = get_trainer(trainer_id_, learning_rate_, *mod_);
+      trainer_ = get_trainer(trainer_id_, learning_rate_, weight_decay_, *mod_);
       trainer_->clipping_enabled = clipping_enabled_;
     }
     dropout_prob_ *= dropout_prob_decay_;
@@ -516,6 +516,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints in comma-delimited groups separated by spaces)")
       ("dropout_prob", po::value<float>()->default_value(0.0), "Starting dropout probability")
       ("dropout_prob_decay", po::value<float>()->default_value(1.0), "Dropout probability decay (1.0 for no decay)")
+      ("weight_decay", po::value<float>()->default_value(1e-6), "How much weight decay to perform")
       ("epochs", po::value<int>()->default_value(300), "Number of epochs")
       ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
       ("layers", po::value<string>()->default_value("50"), "Descriptor for hidden layers, e.g. 50_30")
@@ -574,6 +575,7 @@ int ModlmTrain::main(int argc, char** argv) {
   model_out_file_ = vm["model_out"].as<string>();
   dropout_prob_ = vm["dropout_prob"].as<float>();
   dropout_prob_decay_ = vm["dropout_prob_decay"].as<float>();
+  weight_decay_ = vm["dropout_prob"].as<float>();
 
   // Create a heuristic if using one
   if(vm["heuristic"].as<string>() != "")
@@ -670,7 +672,7 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Initialize
   mod_.reset(new cnn::Model);
-  trainer_ = get_trainer(trainer_id_, learning_rate_, *mod_);
+  trainer_ = get_trainer(trainer_id_, learning_rate_, weight_decay_, *mod_);
   trainer_->clipping_enabled = clipping_enabled_;
 
   float uniform_prob = 1.0/dict_->size();
