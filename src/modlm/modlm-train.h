@@ -59,19 +59,25 @@ protected:
   int calc_dropout_set();
 
   template <class Data, class Instance>
+  void perform_training();
+
+  template <class Data, class Instance>
   float calc_instance(const Data & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch);
 
   template <class Instance>
   cnn::expr::Expression create_graph(const Instance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, bool dropout, cnn::ComputationGraph & cg);
 
-  // *** Aggregate training stuff
-  void train_aggregate();
-  std::pair<int,int> create_aggregate_data(const std::string & file_name, IndexedAggregateDataMap & data);
-  void convert_aggregate_data(const IndexedAggregateDataMap & data_map, IndexedAggregateData & data);
-  void sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob);
+  template <class DataMap, class Data>
+  std::pair<int,int> create_data(const std::string & file_name, DataMap & data_map, Data & data);
 
-  // *** Sentence-wise training stuff
-  void train_sentencewise();
+  template <class DataMap, class Data>
+  void finalize_data(const DataMap & data_map, Data & data);
+
+  template <class DataMap, class Data, class Instance>
+  void perform_training();
+
+  // *** Sanity check stuff
+  void sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob);
 
   // Variable settings
   Timer time_;

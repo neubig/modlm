@@ -194,8 +194,6 @@ float ModlmTrain::calc_instance(const Data & data, const std::string & strid, st
   return loss;
 }
 
-// *************** Calculation for aggregate training
-
 template <>
 Expression ModlmTrain::create_graph<IndexedAggregateInstance>(const IndexedAggregateInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, bool dropout, cnn::ComputationGraph & cg) {
   // Dynamically create the target vectors
@@ -216,7 +214,8 @@ Expression ModlmTrain::create_graph<IndexedAggregateInstance>(const IndexedAggre
   return add_to_graph(ctxt_inverter_[inst.first.first], inst.first.second, wdists_, wcnts, dropout, cg);
 }
 
-void ModlmTrain::convert_aggregate_data(const IndexedAggregateDataMap & data_map, IndexedAggregateData & data) {
+template <>
+void ModlmTrain::finalize_data<IndexedAggregateDataMap,IndexedAggregateData>(const IndexedAggregateDataMap & data_map, IndexedAggregateData & data) {
   data.resize(data_map.size());
   auto outer_it = data.begin();
   for(auto & dm : data_map) {
@@ -231,7 +230,8 @@ void ModlmTrain::convert_aggregate_data(const IndexedAggregateDataMap & data_map
   }
 }
 
-pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, IndexedAggregateDataMap & data) {
+template <>
+pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateData>(const string & file_name, IndexedAggregateDataMap & data, IndexedAggregateData &) {
 
   float uniform_prob = 1.0/dict_->size();
   float unk_prob = (penalize_unk_ ? uniform_prob : 1);
@@ -290,24 +290,25 @@ pair<int,int> ModlmTrain::create_aggregate_data(const string & file_name, Indexe
   return total_words;
 }
 
-void ModlmTrain::train_aggregate() {
+template <class DataMap, class Data, class Instance>
+void ModlmTrain::perform_training() {
 
   // Create the testing/validation instances
-  IndexedAggregateData train_inst, valid_inst;
+  Data train_inst, valid_inst;
   pair<int,int> train_words(0,0), valid_words(0,0);
-  vector<IndexedAggregateData> test_inst(test_files_.size());
+  vector<Data> test_inst(test_files_.size());
   vector<pair<int,int> > test_words(test_files_.size(), pair<int,int>(0,0));
-  IndexedAggregateDataMap data_map;
+  DataMap data_map;
   if(valid_file_ != "") {
     cout << "Creating data for " << valid_file_ << " (s=" << time_.Elapsed() << ")" << endl;
-    valid_words = create_aggregate_data(valid_file_, data_map);
-    convert_aggregate_data(data_map, valid_inst);
+    valid_words = create_data<DataMap,Data>(valid_file_, data_map, valid_inst);
+    finalize_data<DataMap,Data>(data_map, valid_inst);
     data_map.clear();
   }
   for(size_t i = 0; i < test_files_.size(); i++) {
     cout << "Creating data for " << test_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
-    test_words[i]  = create_aggregate_data(test_files_[i], data_map);
-    convert_aggregate_data(data_map, test_inst[i]);
+    test_words[i]  = create_data<DataMap,Data>(test_files_[i], data_map, test_inst[i]);
+    finalize_data<DataMap,Data>(data_map, test_inst[i]);
     data_map.clear();
   }
 
@@ -320,10 +321,10 @@ void ModlmTrain::train_aggregate() {
       }
     }
     cout << "Creating data for " << train_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
-    pair<int,int> my_words = create_aggregate_data(train_files_[i], data_map);
+    pair<int,int> my_words = create_data<DataMap,Data>(train_files_[i], data_map, train_inst);
     train_words.first += my_words.first; train_words.second += my_words.second;
   }
-  convert_aggregate_data(data_map, train_inst);
+  finalize_data<DataMap,Data>(data_map, train_inst);
   dists_.clear();
   cout << "Done creating data. Whitening... (s=" << time_.Elapsed() << ")" << endl;
 
@@ -344,9 +345,9 @@ void ModlmTrain::train_aggregate() {
       cout << ", dropout=" << min(dropout_prob_, 1.0f);
     cout << " (s=" << time_.Elapsed() << ")" << endl;
     // Perform training
-    calc_instance<IndexedAggregateData,IndexedAggregateInstance>(train_inst, "trn ", train_words, true, epoch);
+    calc_instance<Data,Instance>(train_inst, "trn ", train_words, true, epoch);
     if(valid_inst.size() != 0) {
-      float valid_loss = calc_instance<IndexedAggregateData,IndexedAggregateInstance>(valid_inst, "vld ", valid_words, false, epoch);
+      float valid_loss = calc_instance<Data,Instance>(valid_inst, "vld ", valid_words, false, epoch);
       if(rate_decay_ != 1.0 && last_valid < valid_loss)
         trainer_->eta0 *= rate_decay_;
       last_valid = valid_loss;
@@ -361,7 +362,7 @@ void ModlmTrain::train_aggregate() {
     }
     for(size_t i = 0; i < test_inst.size(); i++) {
       ostringstream oss;
-      calc_instance<IndexedAggregateData,IndexedAggregateInstance>(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
+      calc_instance<Data,Instance>(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
     }
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
@@ -372,88 +373,6 @@ void ModlmTrain::train_aggregate() {
   }
 
   cout << "Done training! (s=" << time_.Elapsed() << ")" << endl;
-
-}
-
-// *************** Calculation for sentence-based training
-
-void ModlmTrain::train_sentencewise() {
-
-  THROW_ERROR("Sentencewise not yet");
-  // // Create the testing/validation instances
-  // IndexedSentenceData train_inst, valid_inst;
-  // pair<int,int> train_words(0,0), valid_words(0,0);
-  // vector<IndexedSentenceData> test_inst(test_files_.size());
-  // vector<pair<int,int> > test_words(test_files_.size(), pair<int,int>(0,0));
-  // if(valid_file_ != "") {
-  //   cout << "Creating data for " << valid_file_ << " (s=" << time_.Elapsed() << ")" << endl;
-  //   valid_words = create_sentence_data(valid_file_, valid_inst);
-  // }
-  // for(size_t i = 0; i < test_files_.size(); i++) {
-  //   cout << "Creating data for " << test_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
-  //   test_words[i]  = create_sentence_data(test_files_[i], test_inst[i]);
-  // }
-
-  // // Create the training instances
-  // for(size_t i = 0; i < train_files_.size(); i++) {
-  //   for(size_t j = 0; j < model_locs_.size(); j++) {
-  //     if(model_locs_[j].size() != 1) {
-  //       cout << "Started reading model " << model_locs_[j][i+1] << " (s=" << time_.Elapsed() << ")" << endl;
-  //       dists_[j] = DistFactory::from_file(model_locs_[j][i+1], dict_);
-  //     }
-  //   }
-  //   cout << "Creating data for " << train_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
-  //   pair<int,int> my_words = create_sentence_data(train_files_[i], train_inst);
-  //   train_words.first += my_words.first; train_words.second += my_words.second;
-  // }
-  // dists_.clear();
-  // cout << "Done creating data. Whitening... (s=" << time_.Elapsed() << ")" << endl;
-
-  // // Now that we're done creating indexed data, invert the index
-  // dist_indexer_.build_inverse_index(dist_inverter_); dist_indexer_.get_index().clear();
-  // ctxt_indexer_.build_inverse_index(ctxt_inverter_); ctxt_indexer_.get_index().clear();
-
-  // // Whiten the data if necessary
-  // if(whitener_.get() != NULL)
-  //   THROW_ERROR("Whitening not re-implemented yet");
-
-  // // Train a neural network to predict the interpolation coefficients
-  // float last_valid = 1e99, best_valid = 1e99;
-  // for(int epoch = 1; epoch <= epochs_; epoch++) { 
-  //   // Print info about the epoch
-  //   cout << "--- Starting epoch " << epoch << ": "<<(epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer_->eta0;
-  //   if(dropout_prob_ != 0.0)
-  //     cout << ", dropout=" << min(dropout_prob_, 1.0f);
-  //   cout << " (s=" << time_.Elapsed() << ")" << endl;
-  //   // Perform training
-  //   calc_sentence_instance(train_inst, "trn ", train_words, true, epoch);
-  //   if(valid_inst.size() != 0) {
-  //     float valid_loss = calc_sentence_instance(valid_inst, "vld ", valid_words, false, epoch);
-  //     if(rate_decay_ != 1.0 && last_valid < valid_loss)
-  //       trainer_->eta0 *= rate_decay_;
-  //     last_valid = valid_loss;
-  //     // Open the output model
-  //     if(best_valid > valid_loss && model_out_file_ != "") {
-  //       ofstream out(model_out_file_.c_str());
-  //       if(!out) THROW_ERROR("Could not open output file: " << model_out_file_);
-  //       boost::archive::text_oarchive oa(out);
-  //       oa << *mod_;
-  //       best_valid = valid_loss;
-  //     }
-  //   }
-  //   for(size_t i = 0; i < test_inst.size(); i++) {
-  //     ostringstream oss;
-  //     calc_sentence_instance(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
-  //   }
-  //   // Reset the trainer after online learning
-  //   if(epoch == online_epochs_) {
-  //     trainer_ = get_trainer(trainer_id_, learning_rate_, *mod_);
-  //     trainer_->clipping_enabled = clipping_enabled_;
-  //   }
-  //   dropout_prob_ *= dropout_prob_decay_;
-  // }
-
-  // cout << "Done training! (s=" << time_.Elapsed() << ")" << endl;
 
 }
 
@@ -492,7 +411,6 @@ void ModlmTrain::sanity_check_aggregate(const SequenceIndexer<Sentence> & my_cou
   cerr << "Sanity check passed" << endl;
 }
 
-// *************** Calculation for both sentence-based and aggregate training
 
 int ModlmTrain::main(int argc, char** argv) {
   po::options_description desc("*** modlm-train (by Graham Neubig) ***");
@@ -683,9 +601,9 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Actually perform training
   if(training_type_ == "agg") {
-    train_aggregate();
+    perform_training<IndexedAggregateDataMap,IndexedAggregateData,IndexedAggregateInstance>();
   } else if(training_type_ == "sent") {
-    train_sentencewise();
+    THROW_ERROR("Sentencewise training not implemented yet");
   } else {
     THROW_ERROR("Illegal training type");
   }
