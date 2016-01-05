@@ -2,6 +2,7 @@
 #include <fstream>
 #include <string>
 #include <algorithm>
+#include <numeric>
 #include <boost/program_options.hpp>
 #include <boost/range/irange.hpp>
 #include <boost/algorithm/string.hpp>
@@ -198,7 +199,7 @@ float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceIn
     for(auto & elem : dist_trg.second)
       wdists[num_dense_dist_ + elem.first] = elem.second;
     loss_exps.push_back(add_to_graph(ctxt_inverter_[inst.second[i].first], ctxt_ngram, wdists, wcnts, update, cg));
-    ctxt_ngram.erase(ctxt_ngram.begin()); ctxt_ngram.push_back(inst.first[i]);
+    if(word_hist_) { ctxt_ngram.erase(ctxt_ngram.begin()); ctxt_ngram.push_back(inst.first[i]); }
   }
   // Sum the losses and perform computation
   sum(loss_exps);
@@ -232,7 +233,11 @@ float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std
   Timer time;
   pair<int,int> curr_words(0,0);
   int data_done = 0;
-  for(const auto & inst : data) {
+  std::vector<int> idxs(data.size());
+  std::iota(idxs.begin(), idxs.end(), 0);
+  std::shuffle(idxs.begin(), idxs.end(), *cnn::rndeng);
+  for(int id : idxs) {
+    const auto & inst = data[id];
     loss += calc_instance(inst, update, epoch, curr_words);
     elapsed = time.Elapsed();
     data_done++;
