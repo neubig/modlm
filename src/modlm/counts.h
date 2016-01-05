@@ -4,7 +4,7 @@
 #include <unordered_set>
 #include <memory>
 #include <modlm/hashes.h>
-#include <modlm/aggregate-data.h>
+#include <modlm/training-data.h>
 
 namespace cnn { class Dict; }
 

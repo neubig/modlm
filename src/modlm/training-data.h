@@ -21,3 +21,10 @@ typedef std::vector<AggregateInstance> AggregateData;
 typedef std::pair<IndexedAggregateContext, std::vector<std::pair<IndexedDistTarget, int> > > IndexedAggregateInstance;
 typedef std::vector<IndexedAggregateInstance> IndexedAggregateData;
 
+// Sentence-based data types
+// * First is a sentence
+// * Second is a vector of context/distribution-target pairs
+typedef std::pair<modlm::Sentence, std::vector<std::pair<std::vector<float>, DistTarget> > > SentenceInstance;
+typedef std::vector<SentenceInstance> SentenceData;
+typedef std::pair<modlm::Sentence, std::vector<std::pair<int, IndexedDistTarget> > > IndexedSentenceInstance;
+typedef std::vector<IndexedSentenceInstance> IndexedSentenceData;

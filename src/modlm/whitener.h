@@ -2,7 +2,7 @@
 
 #include <vector>
 #include <unordered_map>
-#include <modlm/aggregate-data.h>
+#include <modlm/training-data.h>
 
 namespace modlm {
 

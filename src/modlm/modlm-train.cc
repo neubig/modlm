@@ -84,7 +84,7 @@ ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float 
     return trainer;
 }
 
-// *************** Calculation for both sentence-based and aggregate training
+// ****** Create the graph
 
 Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
                                     const std::vector<WordId> & ctxt_words,
@@ -147,6 +147,72 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
   return nll;
 }
 
+template <>
+float ModlmTrain::calc_instance<IndexedAggregateInstance>(const IndexedAggregateInstance & inst, bool update, int epoch, pair<int,int> & words) {
+  int num_dist = num_dense_dist_ + num_sparse_dist_;
+  float loss = 0.f;
+  for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
+    cnn::ComputationGraph cg;
+    // Dynamically create the target vectors
+    pair<int,int> range(i, min(inst.second.size(), i+max_minibatch_));
+    int num_words = (range.second - range.first);
+    vector<float> wdists_(num_words * num_dist, 0.0), wcnts(num_words);
+    size_t ptr = 0;
+    for(size_t pos = range.first; pos < range.second; pos++) {
+      auto & kv = inst.second[pos];
+      memcpy(&wdists_[ptr], &dist_inverter_[kv.first.first][0], sizeof(float)*num_dense_dist_);
+      ptr += num_dense_dist_;
+      for(auto & elem : kv.first.second)
+        wdists_[ptr + elem.first] = elem.second;
+      ptr += num_sparse_dist_;
+      wcnts[pos-range.first] = kv.second;
+      words.first += kv.second;
+    }
+    add_to_graph(ctxt_inverter_[inst.first.first], inst.first.second, wdists_, wcnts, update, cg);
+    loss += cnn::as_scalar(cg.forward());
+    if(loss != loss) THROW_ERROR("Loss is not a number");
+    if(update) {
+      cg.backward();
+      if(online_epochs_ == -1 || epoch <= online_epochs_)
+        trainer_->update();
+    }
+  }
+  return loss;
+}
+
+template <>
+float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceInstance & inst, bool update, int epoch, pair<int,int> & words) {
+  int num_dist = num_dense_dist_ + num_sparse_dist_;
+  cnn::ComputationGraph cg;
+  vector<float> wcnts(1, 1.f);
+  Sentence ctxt_ngram(word_hist_, 1);
+  std::vector<Expression> loss_exps;
+  words.first += inst.first.size();
+  for(size_t i = 0; i < inst.first.size(); i++) {
+    if(inst.first[i] == 0) words.second++;
+    // Dynamically create the target vectors
+    vector<float> wdists(num_dist, 0.0);
+    auto & dist_trg = inst.second[i].second;
+    memcpy(&wdists[0], &dist_inverter_[dist_trg.first][0], sizeof(float)*num_dense_dist_);
+    for(auto & elem : dist_trg.second)
+      wdists[num_dense_dist_ + elem.first] = elem.second;
+    loss_exps.push_back(add_to_graph(ctxt_inverter_[inst.second[i].first], ctxt_ngram, wdists, wcnts, update, cg));
+    ctxt_ngram.erase(ctxt_ngram.begin()); ctxt_ngram.push_back(inst.first[i]);
+  }
+  // Sum the losses and perform computation
+  sum(loss_exps);
+  float loss = cnn::as_scalar(cg.forward());
+  if(loss != loss) THROW_ERROR("Loss is not a number");
+  if(update) {
+    cg.backward();
+    if(online_epochs_ == -1 || epoch <= online_epochs_)
+      trainer_->update();
+  }
+  return loss;
+}
+
+// ****** Calculate things for a single data set
+
 int ModlmTrain::calc_dropout_set() {
   uniform_real_distribution<float> float_distribution(0.0, 1.0);  
   if(float_distribution(*cnn::rndeng) >= dropout_prob_) {
@@ -159,24 +225,14 @@ int ModlmTrain::calc_dropout_set() {
 }
 
 template <class Data, class Instance>
-float ModlmTrain::calc_instance(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, int epoch) {
+float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, int epoch) {
   float loss = 0.0, print_every = 60.0, elapsed;
   float last_print = 0;
   Timer time;
   pair<int,int> curr_words(0,0);
   int data_done = 0;
-  for(auto inst : data) {
-    for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
-      cnn::ComputationGraph cg;
-      create_graph<Instance>(inst, make_pair(i, min(inst.second.size(), i+max_minibatch_)), curr_words, update, cg);
-      loss += cnn::as_scalar(cg.forward());
-      if(loss != loss) THROW_ERROR("Loss is not a number");
-      if(update) {
-        cg.backward();
-        if(online_epochs_ == -1 || epoch <= online_epochs_)
-          trainer_->update();
-      }
-    }
+  for(const auto & inst : data) {
+    loss += calc_instance(inst, update, epoch, curr_words);
     elapsed = time.Elapsed();
     data_done++;
     if(elapsed > last_print + print_every) {
@@ -194,25 +250,7 @@ float ModlmTrain::calc_instance(const Data & data, const std::string & strid, st
   return loss;
 }
 
-template <>
-Expression ModlmTrain::create_graph<IndexedAggregateInstance>(const IndexedAggregateInstance & inst, pair<size_t,size_t> range, pair<int,int> & words, bool dropout, cnn::ComputationGraph & cg) {
-  // Dynamically create the target vectors
-  int num_dist = num_dense_dist_ + num_sparse_dist_;
-  int num_words = (range.second - range.first);
-  vector<float> wdists_(num_words * num_dist, 0.0), wcnts(num_words);
-  size_t ptr = 0;
-  for(size_t pos = range.first; pos < range.second; pos++) {
-    auto & kv = inst.second[pos];
-    memcpy(&wdists_[ptr], &dist_inverter_[kv.first.first][0], sizeof(float)*num_dense_dist_);
-    ptr += num_dense_dist_;
-    for(auto & elem : kv.first.second)
-      wdists_[ptr + elem.first] = elem.second;
-    ptr += num_sparse_dist_;
-    wcnts[pos-range.first] = kv.second;
-    words.first += kv.second;
-  }
-  return add_to_graph(ctxt_inverter_[inst.first.first], inst.first.second, wdists_, wcnts, dropout, cg);
-}
+// ********* Create data
 
 template <>
 void ModlmTrain::finalize_data<IndexedAggregateDataMap,IndexedAggregateData>(const IndexedAggregateDataMap & data_map, IndexedAggregateData & data) {
@@ -256,7 +294,7 @@ pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateDa
   // Create training data (num words, ctxt features, each model, true counts)
   pair<int,int> total_words(0,0);
   // Create and allocate the targets:
-  std::vector<float> ctxt_dense(num_ctxt_);
+  std::vector<float> ctxt_dense(num_ctxt_), trg_dense(num_dense_dist_);
   std::vector<WordId> ctxt_sparse(word_hist_);
   // Loop through each of the contexts
   for(auto & kv : my_counts.get_index()) {
@@ -272,12 +310,8 @@ pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateDa
       dist->calc_ctxt_feats(ctxt_words, &ctxt_dense[curr_ctxt]);
       curr_ctxt += dist->get_ctxt_size();
     }
-    // Prepare the pointers for each word
-    std::vector<float> trg_dense(num_dense_dist_);
-    std::vector<std::pair<int,float> > trg_sparse;
-    total_words.first += kv.second;
-    if(*kv.first.rbegin() == 0) total_words.second += kv.second;
     // Calculate all of the distributions
+    std::vector<std::pair<int,float> > trg_sparse;
     int dense_offset = 0, sparse_offset = 0;
     for(auto dist : dists_)
       dist->calc_word_dists(kv.first, uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
@@ -285,10 +319,67 @@ pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateDa
     IndexedAggregateContext full_ctxt(ctxt_indexer_.get_index(ctxt_dense, true), ctxt_sparse);
     IndexedDistTarget full_trg(dist_indexer_.get_index(trg_dense, true), trg_sparse);
     data[full_ctxt][full_trg] += kv.second;
+    total_words.first += kv.second;
+    if(*kv.first.rbegin() == 0) total_words.second += kv.second;
   } 
 
   return total_words;
 }
+
+template <>
+void ModlmTrain::finalize_data<int,IndexedSentenceData>(const int & data_map, IndexedSentenceData & data) { }
+
+template <>
+pair<int,int> ModlmTrain::create_data<int,IndexedSentenceData>(const string & file_name, int & data_map, IndexedSentenceData & data) {
+  float uniform_prob = 1.0/dict_->size();
+  float unk_prob = (penalize_unk_ ? uniform_prob : 1);
+
+  // Create training data (num words, ctxt features, each model, true counts)
+  pair<int,int> total_words(0,0);
+
+  // Create and allocate the targets:
+  std::vector<float> ctxt_dense(num_ctxt_), trg_dense(num_dense_dist_);
+
+  // Load counts
+  ifstream in(file_name);
+  if(!in) THROW_ERROR("Could not open in create_instances: " << file_name);
+  string line;
+  while(getline(in, line)) {
+    // The things we'll need to return
+    Sentence sent = ParseSentence(line, dict_, true);
+    std::vector<std::pair<int, IndexedDistTarget> > ctxt_dists;
+    total_words.first += sent.size();
+    // Start with empty context at the beginning of the sentence
+    Sentence ngram(max_ctxt_, 1);
+    // For each word in the sentence
+    for(size_t i = 0; i < sent.size(); i++) {
+      if(sent[i] == 0) total_words.second++;
+      // Calculate the dense context features
+      int curr_ctxt = 0;
+      for(auto dist : dists_) {
+        assert(dist.get() != NULL);
+        dist->calc_ctxt_feats(ngram, &ctxt_dense[curr_ctxt]);
+        curr_ctxt += dist->get_ctxt_size();
+      }
+      // Change to the n-gram and calculate the distribution for it
+      ngram.push_back(sent[i]); 
+      std::vector<std::pair<int,float> > trg_sparse;
+      int dense_offset = 0, sparse_offset = 0;
+      for(auto dist : dists_)
+        dist->calc_word_dists(ngram, uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
+      // Add the features
+      IndexedDistTarget dist_trg(dist_indexer_.get_index(trg_dense, true), trg_sparse);
+      ctxt_dists.push_back(make_pair(ctxt_indexer_.get_index(ctxt_dense, true), dist_trg));
+      // Reduce the last word in the context
+      ngram.erase(ngram.begin());
+    }
+    data.push_back(make_pair(sent, ctxt_dists));
+  }
+
+  return total_words;
+}
+
+// ***************** Training functions
 
 template <class DataMap, class Data, class Instance>
 void ModlmTrain::perform_training() {
@@ -298,33 +389,35 @@ void ModlmTrain::perform_training() {
   pair<int,int> train_words(0,0), valid_words(0,0);
   vector<Data> test_inst(test_files_.size());
   vector<pair<int,int> > test_words(test_files_.size(), pair<int,int>(0,0));
-  DataMap data_map;
   if(valid_file_ != "") {
+    DataMap data_map;
     cout << "Creating data for " << valid_file_ << " (s=" << time_.Elapsed() << ")" << endl;
     valid_words = create_data<DataMap,Data>(valid_file_, data_map, valid_inst);
     finalize_data<DataMap,Data>(data_map, valid_inst);
-    data_map.clear();
   }
   for(size_t i = 0; i < test_files_.size(); i++) {
+    DataMap data_map;
     cout << "Creating data for " << test_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
     test_words[i]  = create_data<DataMap,Data>(test_files_[i], data_map, test_inst[i]);
     finalize_data<DataMap,Data>(data_map, test_inst[i]);
-    data_map.clear();
   }
 
   // Create the training instances
-  for(size_t i = 0; i < train_files_.size(); i++) {
-    for(size_t j = 0; j < model_locs_.size(); j++) {
-      if(model_locs_[j].size() != 1) {
-        cout << "Started reading model " << model_locs_[j][i+1] << " (s=" << time_.Elapsed() << ")" << endl;
-        dists_[j] = DistFactory::from_file(model_locs_[j][i+1], dict_);
+  {
+    DataMap data_map;
+    for(size_t i = 0; i < train_files_.size(); i++) {
+      for(size_t j = 0; j < model_locs_.size(); j++) {
+        if(model_locs_[j].size() != 1) {
+          cout << "Started reading model " << model_locs_[j][i+1] << " (s=" << time_.Elapsed() << ")" << endl;
+          dists_[j] = DistFactory::from_file(model_locs_[j][i+1], dict_);
+        }
       }
+      cout << "Creating data for " << train_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
+      pair<int,int> my_words = create_data<DataMap,Data>(train_files_[i], data_map, train_inst);
+      train_words.first += my_words.first; train_words.second += my_words.second;
     }
-    cout << "Creating data for " << train_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
-    pair<int,int> my_words = create_data<DataMap,Data>(train_files_[i], data_map, train_inst);
-    train_words.first += my_words.first; train_words.second += my_words.second;
+    finalize_data<DataMap,Data>(data_map, train_inst);
   }
-  finalize_data<DataMap,Data>(data_map, train_inst);
   dists_.clear();
   cout << "Done creating data. Whitening... (s=" << time_.Elapsed() << ")" << endl;
 
@@ -345,9 +438,9 @@ void ModlmTrain::perform_training() {
       cout << ", dropout=" << min(dropout_prob_, 1.0f);
     cout << " (s=" << time_.Elapsed() << ")" << endl;
     // Perform training
-    calc_instance<Data,Instance>(train_inst, "trn ", train_words, true, epoch);
+    calc_dataset<Data,Instance>(train_inst, "trn ", train_words, true, epoch);
     if(valid_inst.size() != 0) {
-      float valid_loss = calc_instance<Data,Instance>(valid_inst, "vld ", valid_words, false, epoch);
+      float valid_loss = calc_dataset<Data,Instance>(valid_inst, "vld ", valid_words, false, epoch);
       if(rate_decay_ != 1.0 && last_valid < valid_loss)
         trainer_->eta0 *= rate_decay_;
       last_valid = valid_loss;
@@ -362,7 +455,7 @@ void ModlmTrain::perform_training() {
     }
     for(size_t i = 0; i < test_inst.size(); i++) {
       ostringstream oss;
-      calc_instance<Data,Instance>(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
+      calc_dataset<Data,Instance>(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
     }
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
@@ -603,7 +696,7 @@ int ModlmTrain::main(int argc, char** argv) {
   if(training_type_ == "agg") {
     perform_training<IndexedAggregateDataMap,IndexedAggregateData,IndexedAggregateInstance>();
   } else if(training_type_ == "sent") {
-    THROW_ERROR("Sentencewise training not implemented yet");
+    perform_training<int,IndexedSentenceData,IndexedSentenceInstance>();
   } else {
     THROW_ERROR("Illegal training type");
   }

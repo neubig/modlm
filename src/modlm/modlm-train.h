@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <modlm/sentence.h>
 #include <modlm/timer.h>
-#include <modlm/aggregate-data.h>
+#include <modlm/training-data.h>
 #include <modlm/hashes.h>
 #include <modlm/sequence-indexer.h>
 
@@ -54,18 +54,21 @@ protected:
 
   void print_status(const std::string & strid, int epoch, float loss, std::pair<int,int> words, float percent, float elapsed);
 
-  // *** Shared training stuff
+  // *** Create the graph
+
   cnn::expr::Expression add_to_graph(const std::vector<float> & wctxt, const std::vector<WordId> & words, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, cnn::ComputationGraph & cg);
+
+  template <class Instance>
+  float calc_instance(const Instance & inst, bool update, int epoch, std::pair<int,int> & words);
+
+  // *** Perform training for the whole data set
+
   int calc_dropout_set();
 
   template <class Data, class Instance>
-  void perform_training();
+  float calc_dataset(const Data & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch);
 
-  template <class Data, class Instance>
-  float calc_instance(const Data & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch);
-
-  template <class Instance>
-  cnn::expr::Expression create_graph(const Instance & inst, std::pair<size_t,size_t> range, std::pair<int,int> & curr_words, bool dropout, cnn::ComputationGraph & cg);
+  // *** Functions to create the dataset
 
   template <class DataMap, class Data>
   std::pair<int,int> create_data(const std::string & file_name, DataMap & data_map, Data & data);
@@ -73,13 +76,16 @@ protected:
   template <class DataMap, class Data>
   void finalize_data(const DataMap & data_map, Data & data);
 
+  // *** Main training loop
+
   template <class DataMap, class Data, class Instance>
   void perform_training();
 
   // *** Sanity check stuff
   void sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob);
 
-  // Variable settings
+  // **** Variable settings
+
   Timer time_;
 
   int epochs_;
