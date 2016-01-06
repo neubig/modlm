@@ -13,6 +13,7 @@
 #include <cnn/dict.h>
 #include <cnn/training.h>
 #include <cnn/rnn.h>
+#include <cnn/grad-check.h>
 #include <modlm/modlm-train.h>
 #include <modlm/macros.h>
 #include <modlm/timer.h>
@@ -98,56 +99,57 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
   // Load the targets
   int num_dist = num_sparse_dist_ + num_dense_dist_;
   int num_words = out_cnts.size();
-  Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, out_dists);
-  Expression counts = input(cg, {(unsigned int)num_words}, out_cnts);
+  Expression interp;
 
   // cerr << "out_cnts:  " << print_vec(out_cnts) << endl;
   // cerr << "out_dists: " << print_vec(out_dists) << endl;
   // cerr << "ctxt_feats:  " << print_vec(ctxt_feats) << endl;
+  // cerr << "a: " << print_vec(as_vector(a_expr_.value())) << endl;
 
-  // If not using context, it's really simple
+  // If not using context, just use the bias
   if(!use_context_) {
     if(dropout_prob_ > 0) THROW_ERROR("dropout not implemented for no context");
-    Expression nlprob = -log(transpose(probs) * softmax( parameter(cg, a_) ) );
-    Expression nll = transpose(counts) * nlprob;
-    return nll;
-  }
-
+    interp = softmax( a_expr_ );
   // If using heuristics, then perform heuristic smoothing
-  if(heuristic_.get() != NULL) {
-    vector<float> interp = heuristic_->smooth(num_dense_dist_, ctxt_feats);
-    Expression nlprob = -log( transpose(probs) * input(cg, {(unsigned int)num_dist}, interp) );
-    Expression nll = transpose(counts) * nlprob;
-    return nll;
+  } else if (heuristic_.get() != NULL) {
+    vector<float> interp_vals = heuristic_->smooth(num_dense_dist_, ctxt_feats);
+    interp = input(cg, {(unsigned int)num_dist}, interp_vals);
+  // Otherwise, computer using a neural net
+  } else {
+
+    // Add the context for this instance
+    Expression h = input(cg, {(unsigned int)ctxt_feats.size()}, ctxt_feats);
+
+    // Do the NN computation
+    if(word_hist_ != 0) {
+      vector<Expression> expr_cat;
+      if(ctxt_feats.size() != 0)
+        expr_cat.push_back(h);
+      for(size_t i = 0; i < ctxt_words.size(); i++)
+        expr_cat.push_back(lookup(cg, reps_, ctxt_words[i]));
+      h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
+    }
+
+    if(builder_.get() != NULL)
+      h = builder_->add_input(h);
+
+    Expression softmax_input = affine_transform({a_expr_, V_expr_, h});
+    // Calculate which interpolation coefficients to use
+    int dropout_set = dropout ? calc_dropout_set() : -1;
+    // Calculate the interpolation coefficients, dropping some out if necessary
+    if(dropout_set < 0)
+      interp = softmax( softmax_input );
+    else 
+      interp = exp( log_softmax( softmax_input, dropout_spans_[dropout_set] ) );
+
   }
 
-  // Add the context for this instance
-  Expression h = input(cg, {(unsigned int)ctxt_feats.size()}, ctxt_feats);
-
-  // Do the NN computation
-  if(word_hist_ != 0) {
-    vector<Expression> expr_cat;
-    if(ctxt_feats.size() != 0)
-      expr_cat.push_back(h);
-    for(size_t i = 0; i < ctxt_words.size(); i++)
-      expr_cat.push_back(lookup(cg, reps_, ctxt_words[i]));
-    h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
+  Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, out_dists);
+  Expression nll = -log(transpose(probs) * interp);  
+  if(out_cnts.size() > 1 || out_cnts[0] > 1) {
+    Expression counts = input(cg, {(unsigned int)num_words}, out_cnts);
+    nll = transpose(counts) * nll;
   }
-
-  h = builder_->add_input(h);
-
-  Expression softmax_input = parameter(cg, V_) * h + parameter(cg, a_);
-  // Calculate which interpolation coefficients to use
-  int dropout_set = dropout ? calc_dropout_set() : -1;
-  // Calculate the interpolation coefficients, dropping some out if necessary
-  Expression interp = (dropout_set < 0 ?
-                       softmax( softmax_input ) :
-                       exp( log_softmax( softmax_input, dropout_spans_[dropout_set] ) ));
-  Expression nlprob = -log(transpose(probs) * interp);
-  Expression nll = transpose(counts) * nlprob;
-
-  // cg.PrintGraphviz();
-  // exit(1);
 
   return nll;
 }
@@ -158,8 +160,12 @@ float ModlmTrain::calc_instance<IndexedAggregateInstance>(const IndexedAggregate
   float loss = 0.f;
   for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
     cnn::ComputationGraph cg;
-    builder_->new_graph(cg);
-    builder_->start_new_sequence();
+    V_expr_ = parameter(cg, V_);
+    a_expr_ = parameter(cg, a_);
+    if(builder_.get() != NULL) {
+      builder_->new_graph(cg);
+      builder_->start_new_sequence();
+    }
     // Dynamically create the target vectors
     pair<int,int> range(i, min(inst.second.size(), i+max_minibatch_));
     int num_words = (range.second - range.first);
@@ -191,8 +197,12 @@ template <>
 float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceInstance & inst, bool update, int epoch, pair<int,int> & words) {
   int num_dist = num_dense_dist_ + num_sparse_dist_;
   cnn::ComputationGraph cg;
-  builder_->new_graph(cg);
-  builder_->start_new_sequence();
+  V_expr_ = parameter(cg, V_);
+  a_expr_ = parameter(cg, a_);
+  if(builder_.get() != NULL) {
+    builder_->new_graph(cg);
+    builder_->start_new_sequence();
+  }
   vector<float> wcnts(1, 1.f);
   Sentence ctxt_ngram(word_hist_, 1);
   std::vector<Expression> loss_exps;
@@ -202,9 +212,12 @@ float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceIn
     // Dynamically create the target vectors
     vector<float> wdists(num_dist, 0.0);
     auto & dist_trg = inst.second[i].second;
+    // Sanity checks for memcpy
     memcpy(&wdists[0], &dist_inverter_[dist_trg.first][0], sizeof(float)*num_dense_dist_);
-    for(auto & elem : dist_trg.second)
+    for(auto & elem : dist_trg.second) {
+      assert(elem.first >= 0);
       wdists[num_dense_dist_ + elem.first] = elem.second;
+    }
     loss_exps.push_back(add_to_graph(ctxt_inverter_[inst.second[i].first], ctxt_ngram, wdists, wcnts, update, cg));
     if(word_hist_) { ctxt_ngram.erase(ctxt_ngram.begin()); ctxt_ngram.push_back(inst.first[i]); }
   }
@@ -217,6 +230,7 @@ float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceIn
     if(online_epochs_ == -1 || epoch <= online_epochs_)
       trainer_->update();
   }
+
   return loss;
 }
 
@@ -529,7 +543,6 @@ int ModlmTrain::main(int argc, char** argv) {
       ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints in comma-delimited groups separated by spaces)")
       ("dropout_prob", po::value<float>()->default_value(0.0), "Starting dropout probability")
       ("dropout_prob_decay", po::value<float>()->default_value(1.0), "Dropout probability decay (1.0 for no decay)")
-      ("weight_decay", po::value<float>()->default_value(1e-6), "How much weight decay to perform")
       ("epochs", po::value<int>()->default_value(300), "Number of epochs")
       ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
       ("layers", po::value<string>()->default_value("ff:50:1"), "Descriptor for hidden layers in format type(ff/rnn/lstm):nodes:layers")
@@ -549,6 +562,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("valid_file", po::value<string>()->default_value(""), "Validation file for tuning parameters")
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
       ("vocab_file", po::value<string>()->default_value(""), "Vocab file")
+      ("weight_decay", po::value<float>()->default_value(1e-6), "How much weight decay to perform")
       ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
       ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
       ("wildcards", po::value<string>()->default_value(""), "Wildcards in model/data names for cross validation")
@@ -588,7 +602,7 @@ int ModlmTrain::main(int argc, char** argv) {
   model_out_file_ = vm["model_out"].as<string>();
   dropout_prob_ = vm["dropout_prob"].as<float>();
   dropout_prob_decay_ = vm["dropout_prob_decay"].as<float>();
-  weight_decay_ = vm["dropout_prob"].as<float>();
+  weight_decay_ = vm["weight_decay"].as<float>();
 
   // Create a heuristic if using one
   if(vm["heuristic"].as<string>() != "")
@@ -678,6 +692,7 @@ int ModlmTrain::main(int argc, char** argv) {
           for(size_t j = curr_sparse; j < sparse_end; j++)
             dropout_spans_[i].push_back(j+num_dense_dist_);
         }
+        sort(dropout_spans_[i].begin(), dropout_spans_[i].end());
       }
       mod_id++;
     }

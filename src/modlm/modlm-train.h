@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
+#include <cnn/expr.h>
 #include <modlm/sentence.h>
 #include <modlm/timer.h>
 #include <modlm/training-data.h>
@@ -18,9 +19,6 @@ namespace cnn {
   struct LookupParameters;
   struct Parameters;
   struct RNNBuilder;
-  namespace expr {
-    struct Expression;
-  }
 }
 
 namespace modlm {
@@ -102,8 +100,8 @@ protected:
 
   cnn::LookupParameters* reps_;
   BuilderPtr builder_;
-  cnn::Parameters* V_;
-  cnn::Parameters* a_;
+  cnn::Parameters* V_; cnn::expr::Expression V_expr_;
+  cnn::Parameters* a_; cnn::expr::Expression a_expr_;
 
   float log_unk_prob_;
   int max_ctxt_, num_ctxt_, num_dense_dist_, num_sparse_dist_;

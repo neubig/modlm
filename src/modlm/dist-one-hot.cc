@@ -24,6 +24,7 @@ std::string DistOneHot::get_sig() const {
 // Add stats from one sentence at training time for count-based models
 void DistOneHot::add_stats(const Sentence & sent) {
   for(auto w : sent) {
+    if(w == -1) continue;
     auto it = mapping_.find(w);
     if(it == mapping_.end()) {
       mapping_[w] = back_mapping_.size();
@@ -58,8 +59,8 @@ void DistOneHot::calc_word_dists(const Sentence & ngram,
   WordId wid = *ngram.rbegin();
   auto it = mapping_.find(wid);
   if(it != mapping_.end())
-    trg_sparse.push_back(make_pair(sparse_offset+it->second-1, (wid == 0 ? unk_prob : 1.0)));
-  sparse_offset += mapping_.size();
+    trg_sparse.push_back(make_pair(sparse_offset+it->second, (wid == 0 ? unk_prob : 1.0)));
+  sparse_offset += back_mapping_.size();
 }
 
 // Read/write model. If dict is null, use numerical ids, otherwise strings.
@@ -77,6 +78,7 @@ void DistOneHot::read(DictPtr dict, std::istream & in) {
   while(getline(in, line)) {
     if(line == "") break;
     WordId id = dict->Convert(line);
+    if(id == -1) THROW_ERROR("Out-of-vocabulary word found in one hot model: " << line);
     mapping_[id] = back_mapping_.size();
     back_mapping_.push_back(id);
   }

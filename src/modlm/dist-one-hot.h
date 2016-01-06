@@ -36,7 +36,7 @@ public:
 
   // Get the number of distributions we can expect from this model
   virtual size_t get_dense_size() const override { return 0; }
-  virtual size_t get_sparse_size() const override { return mapping_.size(); }
+  virtual size_t get_sparse_size() const override { return back_mapping_.size(); }
   // And calculate these features given ctxt, for words wids. uniform_prob
   // is the probability assigned in unknown ctxts.
   virtual void calc_word_dists(const Sentence & ngram,

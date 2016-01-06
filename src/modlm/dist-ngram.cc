@@ -196,6 +196,12 @@ size_t DistNgram::get_ctxt_size() const {
 void DistNgram::calc_ctxt_feats(const Sentence & ctxt, float* feats_out) const {
   Sentence ngram;
   int ctxt_size = (smoothing_ == SMOOTH_LIN ? 3 : 4);
+  // DEBUG
+  for(int j = ctxt_pos_.size(); j >= 0; j--)
+    for(size_t i = 1; i < ctxt_size; i++)
+      *(feats_out++) = 0.f;
+  return;
+  // end DEBUG
   for(int j = ctxt_pos_.size(); j >= 0; j--) {
     int id = get_existing_ctxt_id(ngram);
     if(id == -1 || ctxt_cnts_[id].second == 0) {
@@ -314,6 +320,7 @@ void DistNgram::read(DictPtr dict, std::istream & in) {
       boost::split(strs, line, boost::is_any_of("\t"));
       if(strs.size() != 2) THROW_ERROR("Expecting two columns: " << line << endl);
       Sentence ngram = ParseSentence(strs[0], dict, false);
+      for(WordId wid : ngram) if(wid == -1) THROW_ERROR("Out-of-vocabulary word found in one hot model: " << line);
       if(ngram.size() == ngram_len_) {
         mapping_[ngram] = stoi(strs[1]);
       } else {
