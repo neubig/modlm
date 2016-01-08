@@ -48,6 +48,8 @@ Expression FFBuilder::add_input_impl(int prev, const Expression &in) {
 
   Expression x = in;
 
+  if(dropout_rate) x = dropout(x, dropout_rate);
+
   for (unsigned i = 0; i < layers; ++i) {
     const vector<Expression>& vars = param_vars[i];
 
@@ -56,6 +58,9 @@ Expression FFBuilder::add_input_impl(int prev, const Expression &in) {
 
     // x <--- tanh(y)
     x = tanh(y);
+
+    if(dropout_rate) x = dropout(x, dropout_rate);
+
   }
   return x;
 }

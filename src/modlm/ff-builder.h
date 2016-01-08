@@ -26,6 +26,8 @@ struct FFBuilder : public RNNBuilder {
  public:
   Expression add_auxiliary_input(const Expression& x, const Expression &aux);
 
+  void set_dropout(float d) { dropout_rate = d; }
+
   Expression back() const override { return h0.back(); }
   std::vector<Expression> final_h() const override { return h0; }
   std::vector<Expression> final_s() const override { return final_h(); }
@@ -37,15 +39,17 @@ struct FFBuilder : public RNNBuilder {
   unsigned num_h0_components() const override { return 0; }
 
  private:
-  // first index is layer, then x2h h2h hb
+  // first index is layer, then x2h hb
   std::vector<std::vector<Parameters*>> params;
 
-  // first index is layer, then x2h h2h hb
+  // first index is layer, then x2h hb
   std::vector<std::vector<Expression>> param_vars;
 
   // initial value of h
   // defaults to zero matrix input
   std::vector<Expression> h0;
+
+  float dropout_rate;
 
   unsigned layers;
 };

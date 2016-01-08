@@ -119,7 +119,7 @@ protected:
   bool clipping_enabled_;
   bool hold_out_;
   float model_dropout_prob_, model_dropout_decay_;
-  float lstm_dropout_prob_;
+  float node_dropout_prob_;
   float weight_decay_;
   std::vector<std::vector<unsigned> > dropout_spans_;
 

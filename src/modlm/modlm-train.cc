@@ -24,6 +24,7 @@
 #include <modlm/dict-utils.h>
 #include <modlm/whitener.h>
 #include <modlm/heuristic.h>
+#include <modlm/ff-builder.h>
 #include <modlm/sequence-indexer.h>
 #include <modlm/input-file-stream.h>
 
@@ -261,7 +262,11 @@ float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std
 
   // Set the dropout for the LSTM
   if(hidden_spec_.type != "lstm")
-    ((cnn::LSTMBuilder*)builder_.get())->set_dropout(update ? lstm_dropout_prob_ : 0.f);
+    ((cnn::LSTMBuilder*)builder_.get())->set_dropout(update ? node_dropout_prob_ : 0.f);
+  else if(hidden_spec_.type != "ff")
+    ((cnn::FFBuilder*)builder_.get())->set_dropout(update ? node_dropout_prob_ : 0.f);
+  else if(node_dropout_prob_)
+    THROW_ERROR("Non-zero dropout prob for layer type '" << hidden_spec_.type << "' that doesn't support it");
 
   float loss = 0.0, print_every = 60.0, elapsed;
   float last_print = 0;
@@ -466,9 +471,9 @@ void ModlmTrain::perform_training() {
 
   std::vector<int> train_idxs(train_inst.size());
   std::iota(train_idxs.begin(), train_idxs.end(), 0);
-  std::vector<pair<size_t,size_t> > evaluate_ranges;
-  for(int i = 0; i < evaluate_frequency_; i++)
-    evaluate_ranges.push_back(make_pair(train_idxs.size()*i/evaluate_frequency_, train_idxs.size()*(i+1)/evaluate_frequency_));
+  std::vector<size_t> evaluate_ranges(1,0);
+  for(int i = 1; i <= evaluate_frequency_; i++)
+    evaluate_ranges.push_back(train_idxs.size()*i/evaluate_frequency_);
 
   // Whiten the data if necessary
   if(whitener_.get() != NULL)
@@ -477,15 +482,16 @@ void ModlmTrain::perform_training() {
   // Train a neural network to predict_ the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; ) { 
+    bool is_online = online_epochs_==-1||epoch<=online_epochs_;
     for(size_t range = 1; range <= evaluate_frequency_; range++) {
       pair<int,int> epoch_pair(epoch, evaluate_frequency_ == 1 ? 0 : range);
       // Print info about the epoch
-      cout << "--- Starting epoch " << epoch << "-" << range << ": "<<(online_epochs_==-1||epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer_->eta0;
+      cout << "--- Starting epoch " << epoch << "-" << range << ": "<<(is_online?"online":"batch")<<", lr=" << trainer_->eta0;
       if(model_dropout_prob_ != 0.0)
         cout << ", dropout=" << min(model_dropout_prob_, 1.0f);
       cout << " (s=" << time_.Elapsed() << ")" << endl;
       // Perform training
-      calc_dataset<Data,Instance>(train_inst, "trn ", train_words, true, epoch_pair, train_idxs, evaluate_ranges[range]);
+      calc_dataset<Data,Instance>(train_inst, "trn ", train_words, true, epoch_pair, train_idxs, make_pair(evaluate_ranges[range], evaluate_ranges[range+1]));
       if(valid_inst.size() != 0) {
         float valid_loss = calc_dataset<Data,Instance>(valid_inst, "vld ", valid_words, false, epoch_pair);
         if(rate_decay_ != 1.0 && last_valid < valid_loss)
@@ -507,6 +513,8 @@ void ModlmTrain::perform_training() {
     if(epoch == online_epochs_) {
       trainer_ = get_trainer(trainer_id_, learning_rate_, weight_decay_, *mod_);
       trainer_->clipping_enabled = clipping_enabled_;
+      evaluate_frequency_ = 1;
+      evaluate_ranges.resize(2); evaluate_ranges[1] = train_idxs.size();
     }
     model_dropout_prob_ *= model_dropout_decay_;
   }
@@ -571,7 +579,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("model_in", po::value<string>()->default_value(""), "If resuming training, read the model in")
       ("model_out", po::value<string>()->default_value(""), "File to write the model to")
       ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
-      ("lstm_dropout_prob", po::value<float>()->default_value(0.0), "How much dropout to cause the LSTM to do")
+      ("node_dropout_prob", po::value<float>()->default_value(0.0), "How much dropout to cause the LSTM to do")
       ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("rate_thresh",  po::value<float>()->default_value(1e-5), "Threshold for the learning rate")
@@ -615,7 +623,7 @@ int ModlmTrain::main(int argc, char** argv) {
   epochs_ = vm["epochs"].as<int>();
   max_minibatch_ = vm["max_minibatch"].as<int>();
   online_epochs_ = vm["online_epochs"].as<int>();
-  evaluate_frequency_ = vm["evaluate_frequency"].as<int>();
+  evaluate_frequency_ = (online_epochs_ == 0 ? 1 : vm["evaluate_frequency"].as<int>());
   trainer_id_ = vm["trainer"].as<string>();
   learning_rate_ = vm["learning_rate"].as<float>();
   clipping_enabled_ = vm["clipping_enabled"].as<bool>();
@@ -624,7 +632,7 @@ int ModlmTrain::main(int argc, char** argv) {
   model_out_file_ = vm["model_out"].as<string>();
   model_dropout_prob_ = vm["model_dropout_prob"].as<float>();
   model_dropout_decay_ = vm["model_dropout_decay"].as<float>();
-  lstm_dropout_prob_ = vm["lstm_dropout_prob"].as<float>();
+  node_dropout_prob_ = vm["node_dropout_prob"].as<float>();
   weight_decay_ = vm["weight_decay"].as<float>();
 
   // Create a heuristic if using one
