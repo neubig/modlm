@@ -13,6 +13,7 @@
 #include <cnn/dict.h>
 #include <cnn/training.h>
 #include <cnn/rnn.h>
+#include <cnn/lstm.h>
 #include <cnn/grad-check.h>
 #include <modlm/modlm-train.h>
 #include <modlm/macros.h>
@@ -43,11 +44,12 @@ inline std::string print_vec(const std::vector<T> vec) {
   return oss.str();
 }
 
-void ModlmTrain::print_status(const std::string & strid, int epoch, float loss, pair<int,int> words, float percent, float elapsed) {
+void ModlmTrain::print_status(const std::string & strid, std::pair<int,int> epoch, float loss, pair<int,int> words, float percent, float elapsed) {
   float ppl = exp(loss/words.first);
   float ppl_nounk = exp((loss + words.second * log_unk_prob_)/words.first);
   float wps = words.first / elapsed;
-  cout << strid << " epoch " << epoch;
+  cout << strid << " epoch " << epoch.first;
+  if(epoch.second != 0) cout << "-" << epoch.second;
   if(percent >= 0) cout << " (" << percent << "%)";
   cout << ": ppl=" << ppl << "   (";
   if(penalize_unk_ && words.second != -1) cout << "ppl_nounk=" << ppl_nounk << ", ";
@@ -108,7 +110,7 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
 
   // If not using context, just use the bias
   if(!use_context_) {
-    if(dropout_prob_ > 0) THROW_ERROR("dropout not implemented for no context");
+    if(model_dropout_prob_ > 0) THROW_ERROR("dropout not implemented for no context");
     interp = softmax( a_expr_ );
   // If using heuristics, then perform heuristic smoothing
   } else if (heuristic_.get() != NULL) {
@@ -155,7 +157,7 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
 }
 
 template <>
-float ModlmTrain::calc_instance<IndexedAggregateInstance>(const IndexedAggregateInstance & inst, bool update, int epoch, pair<int,int> & words) {
+float ModlmTrain::calc_instance<IndexedAggregateInstance>(const IndexedAggregateInstance & inst, bool update, std::pair<int,int> epoch, pair<int,int> & words) {
   int num_dist = num_dense_dist_ + num_sparse_dist_;
   float loss = 0.f;
   for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
@@ -186,7 +188,7 @@ float ModlmTrain::calc_instance<IndexedAggregateInstance>(const IndexedAggregate
     if(loss != loss) THROW_ERROR("Loss is not a number");
     if(update) {
       cg.backward();
-      if(online_epochs_ == -1 || epoch <= online_epochs_)
+      if(online_epochs_ == -1 || epoch.first <= online_epochs_)
         trainer_->update();
     }
   }
@@ -194,7 +196,7 @@ float ModlmTrain::calc_instance<IndexedAggregateInstance>(const IndexedAggregate
 }
 
 template <>
-float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceInstance & inst, bool update, int epoch, pair<int,int> & words) {
+float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceInstance & inst, bool update, std::pair<int,int> epoch, pair<int,int> & words) {
   int num_dist = num_dense_dist_ + num_sparse_dist_;
   cnn::ComputationGraph cg;
   V_expr_ = parameter(cg, V_);
@@ -227,7 +229,7 @@ float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceIn
   if(loss != loss) THROW_ERROR("Loss is not a number");
   if(update) {
     cg.backward();
-    if(online_epochs_ == -1 || epoch <= online_epochs_)
+    if(online_epochs_ == -1 || epoch.first <= online_epochs_)
       trainer_->update();
   }
 
@@ -238,7 +240,7 @@ float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceIn
 
 int ModlmTrain::calc_dropout_set() {
   uniform_real_distribution<float> float_distribution(0.0, 1.0);  
-  if(float_distribution(*cnn::rndeng) >= dropout_prob_) {
+  if(float_distribution(*cnn::rndeng) >= model_dropout_prob_) {
     return -1;
   } else {
     assert(dropout_spans_.size() > 0);
@@ -248,31 +250,41 @@ int ModlmTrain::calc_dropout_set() {
 }
 
 template <class Data, class Instance>
-float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, int epoch) {
+float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, std::pair<int,int> epoch) {
+  std::vector<int> idxs(data.size());
+  std::iota(idxs.begin(), idxs.end(), 0);
+  return calc_dataset<Data,Instance>(data, strid, words, update, epoch, idxs, make_pair(0, idxs.size()));
+}
+
+template <class Data, class Instance>
+float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, std::pair<int,int> epoch, std::vector<int> & idxs, pair<size_t,size_t> range) {
+
+  // Set the dropout for the LSTM
+  if(hidden_spec_.type != "lstm")
+    ((cnn::LSTMBuilder*)builder_.get())->set_dropout(update ? lstm_dropout_prob_ : 0.f);
+
   float loss = 0.0, print_every = 60.0, elapsed;
   float last_print = 0;
   Timer time;
   pair<int,int> curr_words(0,0);
-  int data_done = 0;
-  std::vector<int> idxs(data.size());
-  std::iota(idxs.begin(), idxs.end(), 0);
-  std::shuffle(idxs.begin(), idxs.end(), *cnn::rndeng);
-  for(int id : idxs) {
+  for(size_t my_pos = range.first; my_pos < range.second; my_pos++) {
+    int id = idxs[my_pos];
     const auto & inst = data[id];
     loss += calc_instance(inst, update, epoch, curr_words);
     elapsed = time.Elapsed();
-    data_done++;
     if(elapsed > last_print + print_every) {
-      print_status(strid, epoch, loss, curr_words, 100.0*curr_words.first/words.first, elapsed);
+      print_status(strid, epoch, loss, curr_words, 100.0*my_pos/(float)idxs.size(), elapsed);
       last_print += print_every;
     }
   }
   elapsed = time.Elapsed();
-  print_status(strid, epoch, loss, words, -1, elapsed);
+  print_status(strid, epoch, loss, curr_words, -1, elapsed);
   if(update) {
-    if(online_epochs_ != -1 && epoch > online_epochs_)
-      trainer_->update();
-    trainer_->update_epoch();
+    if(range.second == data.size()) {
+      if(online_epochs_ != -1 && epoch.first > online_epochs_)
+        trainer_->update();
+      trainer_->update_epoch();
+    }
   }
   return loss;
 }
@@ -452,44 +464,51 @@ void ModlmTrain::perform_training() {
   dist_indexer_.build_inverse_index(dist_inverter_); dist_indexer_.get_index().clear();
   ctxt_indexer_.build_inverse_index(ctxt_inverter_); ctxt_indexer_.get_index().clear();
 
+  std::vector<int> train_idxs(train_inst.size());
+  std::iota(train_idxs.begin(), train_idxs.end(), 0);
+  std::vector<pair<size_t,size_t> > evaluate_ranges;
+  for(int i = 0; i < evaluate_frequency_; i++)
+    evaluate_ranges.push_back(make_pair(train_idxs.size()*i/evaluate_frequency_, train_idxs.size()*(i+1)/evaluate_frequency_));
+
   // Whiten the data if necessary
   if(whitener_.get() != NULL)
     THROW_ERROR("Whitening not re-implemented yet");
 
   // Train a neural network to predict_ the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
-  for(int epoch = 1; epoch <= epochs_; epoch++) { 
-    // Print info about the epoch
-    cout << "--- Starting epoch " << epoch << ": "<<(epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer_->eta0;
-    if(dropout_prob_ != 0.0)
-      cout << ", dropout=" << min(dropout_prob_, 1.0f);
-    cout << " (s=" << time_.Elapsed() << ")" << endl;
-    // Perform training
-    calc_dataset<Data,Instance>(train_inst, "trn ", train_words, true, epoch);
-    if(valid_inst.size() != 0) {
-      float valid_loss = calc_dataset<Data,Instance>(valid_inst, "vld ", valid_words, false, epoch);
-      if(rate_decay_ != 1.0 && last_valid < valid_loss)
-        trainer_->eta0 *= rate_decay_;
-      last_valid = valid_loss;
-      // Open the output model
-      if(best_valid > valid_loss && model_out_file_ != "") {
-        ofstream out(model_out_file_.c_str());
-        if(!out) THROW_ERROR("Could not open output file: " << model_out_file_);
-        boost::archive::text_oarchive oa(out);
-        oa << *mod_;
-        best_valid = valid_loss;
+  for(int epoch = 1; epoch <= epochs_; ) { 
+    for(size_t range = 1; range <= evaluate_frequency_; range++) {
+      pair<int,int> epoch_pair(epoch, evaluate_frequency_ == 1 ? 0 : range);
+      // Print info about the epoch
+      cout << "--- Starting epoch " << epoch << "-" << range << ": "<<(epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer_->eta0;
+      if(model_dropout_prob_ != 0.0)
+        cout << ", dropout=" << min(model_dropout_prob_, 1.0f);
+      cout << " (s=" << time_.Elapsed() << ")" << endl;
+      // Perform training
+      calc_dataset<Data,Instance>(train_inst, "trn ", train_words, true, epoch_pair, train_idxs, evaluate_ranges[range]);
+      if(valid_inst.size() != 0) {
+        float valid_loss = calc_dataset<Data,Instance>(valid_inst, "vld ", valid_words, false, epoch_pair);
+        if(rate_decay_ != 1.0 && last_valid < valid_loss)
+          trainer_->eta0 *= rate_decay_;
+        last_valid = valid_loss;
+        // Open the output model
+        if(best_valid > valid_loss && model_out_file_ != "") {
+          ofstream out(model_out_file_.c_str());
+          if(!out) THROW_ERROR("Could not open output file: " << model_out_file_);
+          boost::archive::text_oarchive oa(out);
+          oa << *mod_;
+          best_valid = valid_loss;
+        }
       }
-    }
-    for(size_t i = 0; i < test_inst.size(); i++) {
-      ostringstream oss;
-      calc_dataset<Data,Instance>(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch);
+      for(size_t i = 0; i < test_inst.size(); i++)
+        calc_dataset<Data,Instance>(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch_pair);
     }
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
       trainer_ = get_trainer(trainer_id_, learning_rate_, weight_decay_, *mod_);
       trainer_->clipping_enabled = clipping_enabled_;
     }
-    dropout_prob_ *= dropout_prob_decay_;
+    model_dropout_prob_ *= model_dropout_decay_;
   }
 
   cout << "Done training! (s=" << time_.Elapsed() << ")" << endl;
@@ -537,12 +556,13 @@ int ModlmTrain::main(int argc, char** argv) {
   desc.add_options()
       ("help", "Produce help message")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
+      ("evaluate_frequency", po::value<int>()->default_value(1), "How many times to evaluate for each training epoch")
       ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
       ("cnn_seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
       ("dist_models", po::value<string>()->default_value(""), "Files containing the distribution models")
       ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints in comma-delimited groups separated by spaces)")
-      ("dropout_prob", po::value<float>()->default_value(0.0), "Starting dropout probability")
-      ("dropout_prob_decay", po::value<float>()->default_value(1.0), "Dropout probability decay (1.0 for no decay)")
+      ("model_dropout_prob", po::value<float>()->default_value(0.0), "Starting model dropout probability")
+      ("model_dropout_decay", po::value<float>()->default_value(1.0), "Model dropout probability decay (1.0 for no decay)")
       ("epochs", po::value<int>()->default_value(300), "Number of epochs")
       ("heuristic", po::value<string>()->default_value(""), "Type of heuristic to use")
       ("layers", po::value<string>()->default_value("ff:50:1"), "Descriptor for hidden layers in format type(ff/rnn/lstm):nodes:layers")
@@ -551,6 +571,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("model_in", po::value<string>()->default_value(""), "If resuming training, read the model in")
       ("model_out", po::value<string>()->default_value(""), "File to write the model to")
       ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
+      ("lstm_dropout_prob", po::value<float>()->default_value(0.0), "How much dropout to cause the LSTM to do")
       ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("rate_thresh",  po::value<float>()->default_value(1e-5), "Threshold for the learning rate")
@@ -594,14 +615,16 @@ int ModlmTrain::main(int argc, char** argv) {
   epochs_ = vm["epochs"].as<int>();
   max_minibatch_ = vm["max_minibatch"].as<int>();
   online_epochs_ = vm["online_epochs"].as<int>();
+  evaluate_frequency_ = vm["evaluate_frequency"].as<int>();
   trainer_id_ = vm["trainer"].as<string>();
   learning_rate_ = vm["learning_rate"].as<float>();
   clipping_enabled_ = vm["clipping_enabled"].as<bool>();
   training_type_ = vm["training_type"].as<string>();
   rate_decay_ = vm["rate_decay"].as<float>();
   model_out_file_ = vm["model_out"].as<string>();
-  dropout_prob_ = vm["dropout_prob"].as<float>();
-  dropout_prob_decay_ = vm["dropout_prob_decay"].as<float>();
+  model_dropout_prob_ = vm["model_dropout_prob"].as<float>();
+  model_dropout_decay_ = vm["model_dropout_decay"].as<float>();
+  lstm_dropout_prob_ = vm["lstm_dropout_prob"].as<float>();
   weight_decay_ = vm["weight_decay"].as<float>();
 
   // Create a heuristic if using one
@@ -615,7 +638,7 @@ int ModlmTrain::main(int argc, char** argv) {
   if(hidden_spec_.type != "ff" && training_type_ == "agg")
     THROW_ERROR("Only feed-forward networks can be used with aggregated training");
 
-  // Calculate dropout
+  // Calculate model dropout
   boost::split(strs, vm["dropout_models"].as<string>(), boost::is_any_of(" "));
   vector<set<int> > dropout_models;
   for(auto str : strs) if(str != "") {

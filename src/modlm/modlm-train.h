@@ -51,21 +51,25 @@ public:
   
 protected:
 
-  void print_status(const std::string & strid, int epoch, float loss, std::pair<int,int> words, float percent, float elapsed);
+  void print_status(const std::string & strid, std::pair<int,int> epoch, float loss, std::pair<int,int> words, float percent, float elapsed);
 
   // *** Create the graph
 
   cnn::expr::Expression add_to_graph(const std::vector<float> & wctxt, const std::vector<WordId> & words, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, cnn::ComputationGraph & cg);
 
   template <class Instance>
-  float calc_instance(const Instance & inst, bool update, int epoch, std::pair<int,int> & words);
+  float calc_instance(const Instance & inst, bool update, std::pair<int,int> epoch, std::pair<int,int> & words);
 
   // *** Perform training for the whole data set
 
   int calc_dropout_set();
 
   template <class Data, class Instance>
-  float calc_dataset(const Data & inst, const std::string & strid, std::pair<int,int> words, bool update, int epoch);
+  float calc_dataset(const Data & inst, const std::string & strid, std::pair<int,int> words, bool update, std::pair<int,int> epoch);
+
+  template <class Data, class Instance>
+  float calc_dataset(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, std::pair<int,int> epoch, std::vector<int> & idxs, std::pair<size_t,size_t> range);
+  
 
   // *** Functions to create the dataset
 
@@ -108,12 +112,14 @@ protected:
   int word_hist_, word_rep_;
   int max_minibatch_;
   int dev_epochs_, online_epochs_;
+  int evaluate_frequency_;
   bool use_context_, penalize_unk_;
   std::string trainer_id_, training_type_;
   float learning_rate_, rate_decay_;
   bool clipping_enabled_;
   bool hold_out_;
-  float dropout_prob_, dropout_prob_decay_;
+  float model_dropout_prob_, model_dropout_decay_;
+  float lstm_dropout_prob_;
   float weight_decay_;
   std::vector<std::vector<unsigned> > dropout_spans_;
 
