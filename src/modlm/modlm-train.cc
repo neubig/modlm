@@ -480,7 +480,7 @@ void ModlmTrain::perform_training() {
     for(size_t range = 1; range <= evaluate_frequency_; range++) {
       pair<int,int> epoch_pair(epoch, evaluate_frequency_ == 1 ? 0 : range);
       // Print info about the epoch
-      cout << "--- Starting epoch " << epoch << "-" << range << ": "<<(epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer_->eta0;
+      cout << "--- Starting epoch " << epoch << "-" << range << ": "<<(online_epochs_==-1||epoch<=online_epochs_?"online":"batch")<<", lr=" << trainer_->eta0;
       if(model_dropout_prob_ != 0.0)
         cout << ", dropout=" << min(model_dropout_prob_, 1.0f);
       cout << " (s=" << time_.Elapsed() << ")" << endl;
