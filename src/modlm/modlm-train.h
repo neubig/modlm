@@ -55,20 +55,17 @@ protected:
 
   // *** Create the graph
 
-  cnn::expr::Expression add_to_graph(const std::vector<float> & wctxt, const std::vector<WordId> & words, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, cnn::ComputationGraph & cg);
+  cnn::expr::Expression add_to_graph(size_t mb_num_sent, const std::vector<float> & wctxt, const std::vector<Sentence> & ctxt_ngrams, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, cnn::ComputationGraph & cg);
 
-  template <class Instance>
-  float calc_instance(const Instance & inst, bool update, std::pair<int,int> epoch, std::pair<int,int> & words);
+  template <class Data, class Instance>
+  float calc_instance(const Data & data, int minibatch, bool update, std::pair<int,int> epoch, std::pair<int,int> & words);
 
   // *** Perform training for the whole data set
 
   int calc_dropout_set();
 
   template <class Data, class Instance>
-  float calc_dataset(const Data & inst, const std::string & strid, std::pair<int,int> words, bool update, std::pair<int,int> epoch);
-
-  template <class Data, class Instance>
-  float calc_dataset(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, std::pair<int,int> epoch, std::vector<int> & idxs, std::pair<size_t,size_t> range);
+  float calc_dataset(const Data & data, bool update, std::pair<int,int> epoch, int my_range = 0);
   
 
   // *** Functions to create the dataset

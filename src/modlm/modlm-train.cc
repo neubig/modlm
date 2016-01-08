@@ -93,15 +93,16 @@ ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float 
 
 // ****** Create the graph
 
-Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
-                                    const std::vector<WordId> & ctxt_words,
+Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
+                                    const std::vector<float> & ctxt_feats,
+                                    const std::vector<Sentence> & ctxt_ngrams,
                                     const vector<float> & out_dists,
                                     const vector<float> & out_cnts,
                                     bool dropout,
                                     cnn::ComputationGraph & cg) {
   // Load the targets
   int num_dist = num_sparse_dist_ + num_dense_dist_;
-  int num_words = out_cnts.size();
+  int num_words = out_cnts.size() / mb_num_sent;
   Expression interp;
 
   // cerr << "out_cnts:  " << print_vec(out_cnts) << endl;
@@ -121,15 +122,19 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
   } else {
 
     // Add the context for this instance
-    Expression h = input(cg, {(unsigned int)ctxt_feats.size()}, ctxt_feats);
+    Expression h = input(cg, cnn::Dim({(unsigned int)(ctxt_feats.size()/mb_num_sent)}, mb_num_sent), ctxt_feats);
 
     // Do the NN computation
     if(word_hist_ != 0) {
       vector<Expression> expr_cat;
       if(ctxt_feats.size() != 0)
         expr_cat.push_back(h);
-      for(size_t i = 0; i < ctxt_words.size(); i++)
-        expr_cat.push_back(lookup(cg, reps_, ctxt_words[i]));
+      std::vector<unsigned> wids(mb_num_sent);
+      for(size_t i = 0; i < ctxt_ngrams.size(); i++) {
+        for(size_t j = 0; j < mb_num_sent; j++)
+          wids[j] = ctxt_ngrams[j][i];
+        expr_cat.push_back(lookup(cg, reps_, wids));
+      }
       h = (expr_cat.size() > 1 ? concatenate(expr_cat) : expr_cat[0]);
     }
 
@@ -147,58 +152,60 @@ Expression ModlmTrain::add_to_graph(const std::vector<float> & ctxt_feats,
 
   }
 
-  Expression probs = input(cg, {(unsigned int)num_dist, (unsigned int)num_words}, out_dists);
+  Expression probs = input(cg, cnn::Dim({(unsigned int)num_dist, (unsigned int)num_words}, mb_num_sent), out_dists);
   Expression nll = -log(transpose(probs) * interp);  
-  if(out_cnts.size() > 1 || out_cnts[0] > 1) {
-    Expression counts = input(cg, {(unsigned int)num_words}, out_cnts);
+  if(num_words > 1 || *max_element(out_cnts.begin(), out_cnts.end()) > 1) {
+    Expression counts = input(cg, cnn::Dim({(unsigned int)num_words}, mb_num_sent), out_cnts);
     nll = transpose(counts) * nll;
   }
+  if(mb_num_sent > 1) nll = sum_batches(nll);
 
   return nll;
 }
 
 template <>
-float ModlmTrain::calc_instance<IndexedAggregateInstance>(const IndexedAggregateInstance & inst, bool update, std::pair<int,int> epoch, pair<int,int> & words) {
-  int num_dist = num_dense_dist_ + num_sparse_dist_;
-  float loss = 0.f;
-  for(size_t i = 0; i < inst.second.size(); i += max_minibatch_) {
-    cnn::ComputationGraph cg;
-    V_expr_ = parameter(cg, V_);
-    a_expr_ = parameter(cg, a_);
-    if(builder_.get() != NULL) {
-      builder_->new_graph(cg);
-      builder_->start_new_sequence();
-    }
-    // Dynamically create the target vectors
-    pair<int,int> range(i, min(inst.second.size(), i+max_minibatch_));
-    int num_words = (range.second - range.first);
-    vector<float> wdists_(num_words * num_dist, 0.0), wcnts(num_words);
-    size_t ptr = 0;
-    for(size_t pos = range.first; pos < range.second; pos++) {
-      auto & kv = inst.second[pos];
-      memcpy(&wdists_[ptr], &dist_inverter_[kv.first.first][0], sizeof(float)*num_dense_dist_);
-      ptr += num_dense_dist_;
-      for(auto & elem : kv.first.second)
-        wdists_[ptr + elem.first] = elem.second;
-      ptr += num_sparse_dist_;
-      wcnts[pos-range.first] = kv.second;
-      words.first += kv.second;
-    }
-    add_to_graph(ctxt_inverter_[inst.first.first], inst.first.second, wdists_, wcnts, update, cg);
-    loss += cnn::as_scalar(cg.forward());
-    if(loss != loss) THROW_ERROR("Loss is not a number");
-    if(update) {
-      cg.backward();
-      if(online_epochs_ == -1 || epoch.first <= online_epochs_)
-        trainer_->update();
-    }
-  }
-  return loss;
+float ModlmTrain::calc_instance<IndexedAggregateData,IndexedAggregateInstance>(const IndexedAggregateData & data, int minibatch_id, bool update, std::pair<int,int> epoch, pair<int,int> & words) {
+  THROW_ERROR("Aggregate training is not minibtached properly yet");
+  // int num_dist = num_dense_dist_ + num_sparse_dist_;
+  // float loss = 0.f;
+  // for(size_t i = 0; i < data.second.size(); i += max_minibatch_) {
+  //   cnn::ComputationGraph cg;
+  //   V_expr_ = parameter(cg, V_);
+  //   a_expr_ = parameter(cg, a_);
+  //   if(builder_.get() != NULL) {
+  //     builder_->new_graph(cg);
+  //     builder_->start_new_sequence();
+  //   }
+  //   // Dynamically create the target vectors
+  //   pair<int,int> range(i, min(data.second.size(), i+max_minibatch_));
+  //   int num_words = (range.second - range.first);
+  //   vector<float> wdists_(num_words * num_dist, 0.0), wcnts(num_words);
+  //   size_t ptr = 0;
+  //   for(size_t pos = range.first; pos < range.second; pos++) {
+  //     auto & kv = data.second[pos];
+  //     memcpy(&wdists_[ptr], &dist_inverter_[kv.first.first][0], sizeof(float)*num_dense_dist_);
+  //     ptr += num_dense_dist_;
+  //     for(auto & elem : kv.first.second)
+  //       wdists_[ptr + elem.first] = elem.second;
+  //     ptr += num_sparse_dist_;
+  //     wcnts[pos-range.first] = kv.second;
+  //     words.first += kv.second;
+  //   }
+  //   add_to_graph(ctxt_inverter_[data.first.first], data.first.second, wdists_, wcnts, update, cg);
+  //   loss += cnn::as_scalar(cg.forward());
+  //   if(loss != loss) THROW_ERROR("Loss is not a number");
+  //   if(update) {
+  //     cg.backward();
+  //     if(online_epochs_ == -1 || epoch.first <= online_epochs_)
+  //       trainer_->update();
+  //   }
+  // }
+  // return loss;
 }
 
 template <>
-float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceInstance & inst, bool update, std::pair<int,int> epoch, pair<int,int> & words) {
-  int num_dist = num_dense_dist_ + num_sparse_dist_;
+float ModlmTrain::calc_instance<IndexedSentenceData,IndexedSentenceInstance>(const IndexedSentenceData & data, int minibatch_id, bool update, std::pair<int,int> epoch, pair<int,int> & words) {
+  // Initialize the computation graph
   cnn::ComputationGraph cg;
   V_expr_ = parameter(cg, V_);
   a_expr_ = parameter(cg, a_);
@@ -206,23 +213,44 @@ float ModlmTrain::calc_instance<IndexedSentenceInstance>(const IndexedSentenceIn
     builder_->new_graph(cg);
     builder_->start_new_sequence();
   }
-  vector<float> wcnts(1, 1.f);
-  Sentence ctxt_ngram(word_hist_, 1);
+  // Get info about the mini-batch
+  size_t mb_begin = data.batch_ranges[minibatch_id], mb_end = data.batch_ranges[minibatch_id+1];
+  size_t mb_num_sent = mb_end-mb_begin, mb_sent_len = data.data[mb_begin].first.size();
+  // Get data about the distributions
+  int num_dist = num_dense_dist_ + num_sparse_dist_;
+  vector<float> wcnts(mb_num_sent, 1.f);
+  std::vector<Sentence> ctxt_ngrams(mb_num_sent, Sentence(word_hist_, 1));
   std::vector<Expression> loss_exps;
-  words.first += inst.first.size();
-  for(size_t i = 0; i < inst.first.size(); i++) {
-    if(inst.first[i] == 0) words.second++;
-    // Dynamically create the target vectors
-    vector<float> wdists(num_dist, 0.0);
-    auto & dist_trg = inst.second[i].second;
-    // Sanity checks for memcpy
-    memcpy(&wdists[0], &dist_inverter_[dist_trg.first][0], sizeof(float)*num_dense_dist_);
-    for(auto & elem : dist_trg.second) {
-      assert(elem.first >= 0);
-      wdists[num_dense_dist_ + elem.first] = elem.second;
+  for(size_t i = 0; i < mb_sent_len; i++) {
+    // Allocate the memory 
+    vector<float> wdists(num_dist*mb_num_sent, 0.0);
+    vector<float> wctxt(num_ctxt_*mb_num_sent, 0.0);
+    // Dynamically create the vectors for each sentence
+    size_t dist_offset = 0, ctxt_offset = 0;
+    for(size_t j = 0; j < mb_num_sent; j++) {
+      const auto & my_inst = data.data[mb_begin+j];
+      // If we have a word here, then process it
+      if(i < my_inst.first.size()) {
+        words.first++;
+        if(my_inst.first[i] == 0) words.second++;
+        // Update the n-gram context if necessary
+        if(word_hist_ && i > 0) { ctxt_ngrams[j].erase(ctxt_ngrams[j].begin()); ctxt_ngrams[j].push_back(my_inst.first[i-1]); }
+        // Create the dists
+        auto & dist_trg = my_inst.second[i].second;
+        memcpy(&wdists[dist_offset], &dist_inverter_[dist_trg.first][0], sizeof(float)*num_dense_dist_);
+        dist_offset += num_dense_dist_;
+        for(auto & elem : dist_trg.second) wdists[dist_offset + elem.first] = elem.second;
+        dist_offset += num_sparse_dist_;
+        // Create the ctxt
+        memcpy(&wctxt[ctxt_offset], &ctxt_inverter_[my_inst.second[i].first], sizeof(float)*num_ctxt_);
+        ctxt_offset += num_ctxt_;
+      // Otherwise, set all distribution probabilities to one
+      } else {
+        for(int k = 0; k < num_dist; k++)
+          wdists[dist_offset++] = 1.0f;
+      }
     }
-    loss_exps.push_back(add_to_graph(ctxt_inverter_[inst.second[i].first], ctxt_ngram, wdists, wcnts, update, cg));
-    if(word_hist_) { ctxt_ngram.erase(ctxt_ngram.begin()); ctxt_ngram.push_back(inst.first[i]); }
+    loss_exps.push_back(add_to_graph(mb_num_sent, wctxt, ctxt_ngrams, wdists, wcnts, update, cg));
   }
   // Sum the losses and perform computation
   sum(loss_exps);
@@ -251,14 +279,7 @@ int ModlmTrain::calc_dropout_set() {
 }
 
 template <class Data, class Instance>
-float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, std::pair<int,int> epoch) {
-  std::vector<int> idxs(data.size());
-  std::iota(idxs.begin(), idxs.end(), 0);
-  return calc_dataset<Data,Instance>(data, strid, words, update, epoch, idxs, make_pair(0, idxs.size()));
-}
-
-template <class Data, class Instance>
-float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std::pair<int,int> words, bool update, std::pair<int,int> epoch, std::vector<int> & idxs, pair<size_t,size_t> range) {
+float ModlmTrain::calc_dataset(const Data & data, bool update, std::pair<int,int> epoch, int my_eval_range) {
 
   // Set the dropout for the LSTM
   if(hidden_spec_.type != "lstm")
@@ -272,20 +293,20 @@ float ModlmTrain::calc_dataset(const Data & data, const std::string & strid, std
   float last_print = 0;
   Timer time;
   pair<int,int> curr_words(0,0);
-  for(size_t my_pos = range.first; my_pos < range.second; my_pos++) {
-    int id = idxs[my_pos];
-    const auto & inst = data[id];
-    loss += calc_instance(inst, update, epoch, curr_words);
+  size_t my_pos;
+  for(my_pos = data.eval_ranges[my_eval_range]; my_pos < data.eval_ranges[my_eval_range+1]; my_pos++) {
+    int minibatch_id = data.curr_order[my_pos];
+    loss += calc_instance<Data,Instance>(data, data.curr_order[my_pos], update, epoch, curr_words);
     elapsed = time.Elapsed();
     if(elapsed > last_print + print_every) {
-      print_status(strid, epoch, loss, curr_words, 100.0*my_pos/(float)idxs.size(), elapsed);
+      print_status(data.name, epoch, loss, curr_words, 100.0*my_pos/(float)data.batch_ranges.size(), elapsed);
       last_print += print_every;
     }
   }
   elapsed = time.Elapsed();
-  print_status(strid, epoch, loss, curr_words, -1, elapsed);
+  print_status(data.name, epoch, loss, curr_words, -1, elapsed);
   if(update) {
-    if(range.second == data.size()) {
+    if(my_pos == data.size()) {
       if(online_epochs_ != -1 && epoch.first > online_epochs_)
         trainer_->update();
       trainer_->update_epoch();
@@ -370,8 +391,32 @@ pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateDa
   return total_words;
 }
 
+template <class T>
+struct FirstSizeGreater {
+    inline bool operator() (const T& data1, const T& data2) {
+        return (data1.first.size() > data2.first.size());
+    }
+};
+
+
 template <>
-void ModlmTrain::finalize_data<int,IndexedSentenceData>(const int & data_map, IndexedSentenceData & data) { }
+void ModlmTrain::finalize_data<int,IndexedSentenceData>(const int & data_map, IndexedSentenceData & data) {
+  // Sort the data in descending order
+  sort(data.begin(), data.end(), FirstSizeGreater<IndexedSentenceInstance>());
+  // Create minibatches with no more than max_minibatch_ words, or 1 sentence
+  data.batch_ranges = {0};
+  size_t last = 0;
+  for(size_t i = 1; i <= data.size(); i++) {
+    if(i == data.size() || data.data[last].first.size()*(i-last+1) > max_minibatch_) {
+      data.batch_ranges.push_back(i); last = i;
+    }
+  }
+  // Create the training IDs
+  data.curr_order.resize(data.batch_ranges.size()-1);
+  std::iota(data.curr_order.begin(), data.curr_order.end(), 0);
+  // By default, evaluate after all data
+  data.eval_ranges = {0,data.curr_order.size()};
+}
 
 template <>
 pair<int,int> ModlmTrain::create_data<int,IndexedSentenceData>(const string & file_name, int & data_map, IndexedSentenceData & data) {
@@ -429,21 +474,20 @@ template <class DataMap, class Data, class Instance>
 void ModlmTrain::perform_training() {
 
   // Create the testing/validation instances
-  Data train_inst, valid_inst;
-  pair<int,int> train_words(0,0), valid_words(0,0);
-  vector<Data> test_inst(test_files_.size());
-  vector<pair<int,int> > test_words(test_files_.size(), pair<int,int>(0,0));
+  Data train_data("trn "), valid_data("vld ");
+  vector<Data> test_data(test_files_.size());
   if(valid_file_ != "") {
     DataMap data_map;
     cout << "Creating data for " << valid_file_ << " (s=" << time_.Elapsed() << ")" << endl;
-    valid_words = create_data<DataMap,Data>(valid_file_, data_map, valid_inst);
-    finalize_data<DataMap,Data>(data_map, valid_inst);
+    create_data<DataMap,Data>(valid_file_, data_map, valid_data);
+    finalize_data<DataMap,Data>(data_map, valid_data);
   }
   for(size_t i = 0; i < test_files_.size(); i++) {
+    test_data[i].name = "tst"+to_string(i);
     DataMap data_map;
     cout << "Creating data for " << test_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
-    test_words[i]  = create_data<DataMap,Data>(test_files_[i], data_map, test_inst[i]);
-    finalize_data<DataMap,Data>(data_map, test_inst[i]);
+    create_data<DataMap,Data>(test_files_[i], data_map, test_data[i]);
+    finalize_data<DataMap,Data>(data_map, test_data[i]);
   }
 
   // Create the training instances
@@ -457,10 +501,9 @@ void ModlmTrain::perform_training() {
         }
       }
       cout << "Creating data for " << train_files_[i] << " (s=" << time_.Elapsed() << ")" << endl;
-      pair<int,int> my_words = create_data<DataMap,Data>(train_files_[i], data_map, train_inst);
-      train_words.first += my_words.first; train_words.second += my_words.second;
+      create_data<DataMap,Data>(train_files_[i], data_map, train_data);
     }
-    finalize_data<DataMap,Data>(data_map, train_inst);
+    finalize_data<DataMap,Data>(data_map, train_data);
   }
   dists_.clear();
   cout << "Done creating data. Whitening... (s=" << time_.Elapsed() << ")" << endl;
@@ -469,11 +512,12 @@ void ModlmTrain::perform_training() {
   dist_indexer_.build_inverse_index(dist_inverter_); dist_indexer_.get_index().clear();
   ctxt_indexer_.build_inverse_index(ctxt_inverter_); ctxt_indexer_.get_index().clear();
 
-  std::vector<int> train_idxs(train_inst.size());
-  std::iota(train_idxs.begin(), train_idxs.end(), 0);
-  std::vector<size_t> evaluate_ranges(1,0);
+  // Create IDs for training to shuffle. We only need for train because
+  // we'll be doing part of the training corpus, then terminating to evaluate
+  // test/dev accuracy, but for test/dev they'll be dynamically generated.
+  train_data.eval_ranges.resize(1); train_data.eval_ranges[0] = 0;
   for(int i = 1; i <= evaluate_frequency_; i++)
-    evaluate_ranges.push_back(train_idxs.size()*i/evaluate_frequency_);
+    train_data.eval_ranges.push_back(train_data.num_minibatches()*i/evaluate_frequency_);
 
   // Whiten the data if necessary
   if(whitener_.get() != NULL)
@@ -491,9 +535,9 @@ void ModlmTrain::perform_training() {
         cout << ", dropout=" << min(model_dropout_prob_, 1.0f);
       cout << " (s=" << time_.Elapsed() << ")" << endl;
       // Perform training
-      calc_dataset<Data,Instance>(train_inst, "trn ", train_words, true, epoch_pair, train_idxs, make_pair(evaluate_ranges[range], evaluate_ranges[range+1]));
-      if(valid_inst.size() != 0) {
-        float valid_loss = calc_dataset<Data,Instance>(valid_inst, "vld ", valid_words, false, epoch_pair);
+      calc_dataset<Data,Instance>(train_data, true, epoch_pair, range);
+      if(valid_data.size() != 0) {
+        float valid_loss = calc_dataset<Data,Instance>(valid_data, false, epoch_pair);
         if(rate_decay_ != 1.0 && last_valid < valid_loss)
           trainer_->eta0 *= rate_decay_;
         last_valid = valid_loss;
@@ -506,15 +550,15 @@ void ModlmTrain::perform_training() {
           best_valid = valid_loss;
         }
       }
-      for(size_t i = 0; i < test_inst.size(); i++)
-        calc_dataset<Data,Instance>(test_inst[i], "tst" + to_string(i), test_words[i], false, epoch_pair);
+      for(size_t i = 0; i < test_data.size(); i++)
+        calc_dataset<Data,Instance>(test_data[i], false, epoch_pair);
     }
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
       trainer_ = get_trainer(trainer_id_, learning_rate_, weight_decay_, *mod_);
       trainer_->clipping_enabled = clipping_enabled_;
       evaluate_frequency_ = 1;
-      evaluate_ranges.resize(2); evaluate_ranges[1] = train_idxs.size();
+      train_data.eval_ranges = {0, train_data.batch_ranges.size()-1};
     }
     model_dropout_prob_ *= model_dropout_decay_;
   }

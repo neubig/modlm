@@ -16,10 +16,10 @@ void Whitener::calc_matrix(const AggregateData & data) {
 
   // Convert the matrix into Eigen
   int data_rows = data.size();
-  int data_cols = data[0].first.first.size();
+  int data_cols = data.data[0].first.first.size();
   MatrixXf X(data_rows, data_cols);
   for(int i : boost::irange(0, data_rows)) {
-    const auto & out_val = data[i];
+    const auto & out_val = data.data[i];
     for(int j : boost::irange(0, data_cols))
       X(i,j) = out_val.first.first[j];
   }
@@ -71,13 +71,13 @@ void Whitener::whiten(AggregateData & data) {
   // Perform whitening on each example
   if(type_ == "mean") {
     for(int i : boost::irange(0, data_rows)) {
-      Map<RowVectorXf> x(&data[i].first.first[0], data_cols);
+      Map<RowVectorXf> x(&data.data[i].first.first[0], data_cols);
       x = (x - X_mean);
     }
   } else {
     Map<const MatrixXf> W(&rotation_vec_[0], data_cols, data_cols);
     for(int i : boost::irange(0, data_rows)) {
-      Map<RowVectorXf> x(&data[i].first.first[0], data_cols);
+      Map<RowVectorXf> x(&data.data[i].first.first[0], data_cols);
       x = (x - X_mean) * W;
     }
   }

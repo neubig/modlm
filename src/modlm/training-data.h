@@ -17,14 +17,38 @@ typedef std::pair<int, std::vector<modlm::WordId> > IndexedAggregateContext;
 
 // A set of aggregate training instances
 typedef std::pair<AggregateContext, std::vector<std::pair<DistTarget, int> > > AggregateInstance;
-typedef std::vector<AggregateInstance> AggregateData;
 typedef std::pair<IndexedAggregateContext, std::vector<std::pair<IndexedDistTarget, int> > > IndexedAggregateInstance;
-typedef std::vector<IndexedAggregateInstance> IndexedAggregateData;
 
 // Sentence-based data types
 // * First is a sentence
 // * Second is a vector of context/distribution-target pairs
 typedef std::pair<modlm::Sentence, std::vector<std::pair<std::vector<float>, DistTarget> > > SentenceInstance;
-typedef std::vector<SentenceInstance> SentenceData;
 typedef std::pair<modlm::Sentence, std::vector<std::pair<int, IndexedDistTarget> > > IndexedSentenceInstance;
-typedef std::vector<IndexedSentenceInstance> IndexedSentenceData;
+
+// Contains all the data and various bookkeeping variables for 
+template <class T>
+struct TrainingData {
+  TrainingData(const std::string & _name = "") : name(_name), data(), all_words(0), unk_words(0), batch_ranges(), eval_ranges(), curr_order() { }
+  
+  // Interfaces to vector
+  size_t size() const { return data.size(); }
+  void resize(size_t s) { data.resize(s); }
+  typename std::vector<T>::iterator begin() { return data.begin(); }
+  typename std::vector<T>::iterator end() { return data.end(); }
+  typename std::vector<T>::const_iterator begin() const { return data.begin(); }
+  typename std::vector<T>::const_iterator end() const { return data.end(); }
+  void push_back(const T & val) { data.push_back(val); }
+  size_t num_minibatches() { return batch_ranges.size()-1; } 
+
+  std::string name;
+  std::vector<T> data;
+  int all_words, unk_words;
+  std::vector<size_t> batch_ranges;
+  std::vector<size_t> eval_ranges;
+  std::vector<size_t> curr_order;
+};
+
+typedef TrainingData<AggregateInstance> AggregateData;
+typedef TrainingData<SentenceInstance> SentenceData;
+typedef TrainingData<IndexedAggregateInstance> IndexedAggregateData;
+typedef TrainingData<IndexedSentenceInstance> IndexedSentenceData;
