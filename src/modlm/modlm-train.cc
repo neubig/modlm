@@ -105,10 +105,9 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
   int num_words = out_cnts.size() / mb_num_sent;
   Expression interp;
 
-  // cerr << "out_cnts:  " << print_vec(out_cnts) << endl;
-  // cerr << "out_dists: " << print_vec(out_dists) << endl;
-  // cerr << "ctxt_feats:  " << print_vec(ctxt_feats) << endl;
-  // cerr << "a: " << print_vec(as_vector(a_expr_.value())) << endl;
+  // cerr << "out_cnts ("<<out_cnts.size()<<"):  " << print_vec(out_cnts) << endl;
+  // cerr << "out_dists ("<<out_dists.size()<<"): " << print_vec(out_dists) << endl;
+  // cerr << "ctxt_feats ("<<ctxt_feats.size()<<"):  " << print_vec(ctxt_feats) << endl;
 
   // If not using context, just use the bias
   if(!use_context_) {
@@ -130,7 +129,7 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
       if(ctxt_feats.size() != 0)
         expr_cat.push_back(h);
       std::vector<unsigned> wids(mb_num_sent);
-      for(size_t i = 0; i < ctxt_ngrams.size(); i++) {
+      for(size_t i = 0; i < ctxt_ngrams[0].size(); i++) {
         for(size_t j = 0; j < mb_num_sent; j++)
           wids[j] = ctxt_ngrams[j][i];
         expr_cat.push_back(lookup(cg, reps_, wids));
@@ -140,7 +139,7 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
 
     if(builder_.get() != NULL)
       h = builder_->add_input(h);
-
+    
     Expression softmax_input = affine_transform({a_expr_, V_expr_, h});
     // Calculate which interpolation coefficients to use
     int dropout_set = dropout ? calc_dropout_set() : -1;
@@ -153,7 +152,10 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
   }
 
   Expression probs = input(cg, cnn::Dim({(unsigned int)num_dist, (unsigned int)num_words}, mb_num_sent), out_dists);
+  // cerr << "interp: " << print_vec(cnn::as_vector(interp.value())) << endl;
+  // cerr << "probs: " << print_vec(cnn::as_vector(probs.value())) << endl;
   Expression nll = -log(transpose(probs) * interp);  
+  // cerr << "nll: " << print_vec(cnn::as_vector(nll.value())) << endl;
   if(num_words > 1 || *max_element(out_cnts.begin(), out_cnts.end()) > 1) {
     Expression counts = input(cg, cnn::Dim({(unsigned int)num_words}, mb_num_sent), out_cnts);
     nll = transpose(counts) * nll;
@@ -242,13 +244,14 @@ float ModlmTrain::calc_instance<IndexedSentenceData,IndexedSentenceInstance>(con
         for(auto & elem : dist_trg.second) wdists[dist_offset + elem.first] = elem.second;
         dist_offset += num_sparse_dist_;
         // Create the ctxt
-        memcpy(&wctxt[ctxt_offset], &ctxt_inverter_[my_inst.second[i].first], sizeof(float)*num_ctxt_);
-        ctxt_offset += num_ctxt_;
+        // cerr << "ctxt ("<<my_inst.second[i].first<<","<<j<<"/"<<mb_num_sent<<"): " << print_vec(ctxt_inverter_[my_inst.second[i].first]) << endl;
+        memcpy(&wctxt[ctxt_offset], &ctxt_inverter_[my_inst.second[i].first][0], sizeof(float)*num_ctxt_);
       // Otherwise, set all distribution probabilities to one
       } else {
         for(int k = 0; k < num_dist; k++)
           wdists[dist_offset++] = 1.0f;
       }
+      ctxt_offset += num_ctxt_;
     }
     loss_exps.push_back(add_to_graph(mb_num_sent, wctxt, ctxt_ngrams, wdists, wcnts, update, cg));
   }
@@ -282,9 +285,9 @@ template <class Data, class Instance>
 float ModlmTrain::calc_dataset(const Data & data, bool update, std::pair<int,int> epoch, int my_eval_range) {
 
   // Set the dropout for the LSTM
-  if(hidden_spec_.type != "lstm")
+  if(hidden_spec_.type == "lstm")
     ((cnn::LSTMBuilder*)builder_.get())->set_dropout(update ? node_dropout_prob_ : 0.f);
-  else if(hidden_spec_.type != "ff")
+  else if(hidden_spec_.type == "ff")
     ((cnn::FFBuilder*)builder_.get())->set_dropout(update ? node_dropout_prob_ : 0.f);
   else if(node_dropout_prob_)
     THROW_ERROR("Non-zero dropout prob for layer type '" << hidden_spec_.type << "' that doesn't support it");
@@ -515,7 +518,7 @@ void ModlmTrain::perform_training() {
   // Create IDs for training to shuffle. We only need for train because
   // we'll be doing part of the training corpus, then terminating to evaluate
   // test/dev accuracy, but for test/dev they'll be dynamically generated.
-  train_data.eval_ranges.resize(1); train_data.eval_ranges[0] = 0;
+  train_data.eval_ranges = {0};
   for(int i = 1; i <= evaluate_frequency_; i++)
     train_data.eval_ranges.push_back(train_data.num_minibatches()*i/evaluate_frequency_);
 
@@ -525,17 +528,21 @@ void ModlmTrain::perform_training() {
 
   // Train a neural network to predict_ the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
-  for(int epoch = 1; epoch <= epochs_; ) { 
+  for(int epoch = 1; epoch <= epochs_; epoch++) { 
+    std::shuffle(train_data.curr_order.begin(), train_data.curr_order.end(), *cnn::rndeng);
     bool is_online = online_epochs_==-1||epoch<=online_epochs_;
+    cerr << "evaluate_frequency_: " << evaluate_frequency_ << endl;
     for(size_t range = 1; range <= evaluate_frequency_; range++) {
       pair<int,int> epoch_pair(epoch, evaluate_frequency_ == 1 ? 0 : range);
       // Print info about the epoch
-      cout << "--- Starting epoch " << epoch << "-" << range << ": "<<(is_online?"online":"batch")<<", lr=" << trainer_->eta0;
+      cout << "--- Starting epoch " << epoch;
+      if(evaluate_frequency_ > 1) cout << "-" << range;
+      cout << ": "<<(is_online?"online":"batch")<<", lr=" << trainer_->eta0;
       if(model_dropout_prob_ != 0.0)
         cout << ", dropout=" << min(model_dropout_prob_, 1.0f);
       cout << " (s=" << time_.Elapsed() << ")" << endl;
       // Perform training
-      calc_dataset<Data,Instance>(train_data, true, epoch_pair, range);
+      calc_dataset<Data,Instance>(train_data, true, epoch_pair, range-1);
       if(valid_data.size() != 0) {
         float valid_loss = calc_dataset<Data,Instance>(valid_data, false, epoch_pair);
         if(rate_decay_ != 1.0 && last_valid < valid_loss)

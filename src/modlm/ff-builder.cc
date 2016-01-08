@@ -17,7 +17,7 @@ enum { X2H=0, HB };
 FFBuilder::FFBuilder(unsigned layers,
                        unsigned input_dim,
                        unsigned hidden_dim,
-                       Model* model) : layers(layers) {
+                       Model* model) : layers(layers), dropout_rate(0.f) {
   unsigned layer_input_dim = input_dim;
   for (unsigned i = 0; i < layers; ++i) {
     Parameters* p_x2h = model->add_parameters({hidden_dim, layer_input_dim});

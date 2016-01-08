@@ -196,12 +196,6 @@ size_t DistNgram::get_ctxt_size() const {
 void DistNgram::calc_ctxt_feats(const Sentence & ctxt, float* feats_out) const {
   Sentence ngram;
   int ctxt_size = (smoothing_ == SMOOTH_LIN ? 3 : 4);
-  // DEBUG
-  for(int j = ctxt_pos_.size(); j >= 0; j--)
-    for(size_t i = 1; i < ctxt_size; i++)
-      *(feats_out++) = 0.f;
-  return;
-  // end DEBUG
   for(int j = ctxt_pos_.size(); j >= 0; j--) {
     int id = get_existing_ctxt_id(ngram);
     if(id == -1 || ctxt_cnts_[id].second == 0) {
