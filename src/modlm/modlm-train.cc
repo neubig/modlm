@@ -308,13 +308,6 @@ float ModlmTrain::calc_dataset(const Data & data, bool update, std::pair<int,int
   }
   elapsed = time.Elapsed();
   print_status(data.name, epoch, loss, curr_words, -1, elapsed);
-  if(update) {
-    if(my_pos == data.size()) {
-      if(online_epochs_ != -1 && epoch.first > online_epochs_)
-        trainer_->update();
-      trainer_->update_epoch();
-    }
-  }
   return loss;
 }
 
@@ -543,6 +536,10 @@ void ModlmTrain::perform_training() {
       cout << " (s=" << time_.Elapsed() << ")" << endl;
       // Perform training
       calc_dataset<Data,Instance>(train_data, true, epoch_pair, range-1);
+      if(online_epochs_ != -1 && epoch > online_epochs_)
+        trainer_->update();
+      trainer_->update_epoch();
+      // Perform testing
       if(valid_data.size() != 0) {
         float valid_loss = calc_dataset<Data,Instance>(valid_data, false, epoch_pair);
         if(rate_decay_ != 1.0 && last_valid < valid_loss)
