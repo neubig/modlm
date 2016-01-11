@@ -2,7 +2,6 @@
 
 #include <vector>
 #include <unordered_map>
-#include <modlm/training-data.h>
 
 namespace modlm {
 
@@ -10,9 +9,9 @@ class Whitener {
 public:
   Whitener(const std::string & type, float epsilon) : type_(type), epsilon_(epsilon) { }
   // Find the transformation matrix for whitening in Eigen column-major format
-  void calc_matrix(const AggregateData & data);
+  void calc_matrix(const std::vector<std::vector<float> > & data, const std::vector<int> & use_in_training);
   // Perform whitening
-  void whiten(AggregateData & data);
+  void whiten(std::vector<std::vector<float> > & data);
 
 protected:
   std::string type_;

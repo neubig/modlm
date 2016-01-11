@@ -466,6 +466,21 @@ pair<int,int> ModlmTrain::create_data<int,IndexedSentenceData>(const string & fi
 
 // ***************** Training functions
 
+template <>
+void ModlmTrain::check_to_whiten<IndexedSentenceData>(const IndexedSentenceData & data, std::vector<int> & to_whiten) {
+  for(const auto & val : data)
+    for(const auto & val2 : val.second)
+      to_whiten[val2.first] = 1;
+      // to_whiten[val2.first]++;
+}
+template <>
+void ModlmTrain::check_to_whiten<IndexedAggregateData>(const IndexedAggregateData & data, std::vector<int> & to_whiten) {
+  for(const auto & val : data)
+    for(const auto & val2 : val.second)
+      to_whiten[val.first.first] = 1;
+      // to_whiten[val.first.first] += val2.second;
+}
+
 template <class DataMap, class Data, class Instance>
 void ModlmTrain::perform_training() {
 
@@ -516,15 +531,18 @@ void ModlmTrain::perform_training() {
     train_data.eval_ranges.push_back(train_data.num_minibatches()*i/evaluate_frequency_);
 
   // Whiten the data if necessary
-  if(whitener_.get() != NULL)
-    THROW_ERROR("Whitening not re-implemented yet");
+  if(whitener_.get() != NULL) {
+    std::vector<int> to_whiten(ctxt_inverter_.size());
+    check_to_whiten(train_data, to_whiten);
+    whitener_->calc_matrix(ctxt_inverter_, to_whiten);
+    whitener_->whiten(ctxt_inverter_);
+  }
 
   // Train a neural network to predict_ the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; epoch++) { 
     std::shuffle(train_data.curr_order.begin(), train_data.curr_order.end(), *cnn::rndeng);
     bool is_online = online_epochs_==-1||epoch<=online_epochs_;
-    cerr << "evaluate_frequency_: " << evaluate_frequency_ << endl;
     for(size_t range = 1; range <= evaluate_frequency_; range++) {
       pair<int,int> epoch_pair(epoch, evaluate_frequency_ == 1 ? 0 : range);
       // Print info about the epoch

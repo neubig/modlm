@@ -62,6 +62,9 @@ protected:
 
   // *** Perform training for the whole data set
 
+  template <class Data>
+  void check_to_whiten(const Data & data, std::vector<int> & to_whiten);
+
   int calc_dropout_set();
 
   template <class Data, class Instance>
