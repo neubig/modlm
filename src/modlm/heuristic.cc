@@ -7,7 +7,7 @@ using namespace modlm;
 
 std::vector<float> HeuristicAbs::smooth(int num_dists, const std::vector<float> & ctxts) {
   if(ctxts.size() % 4 != 0 || num_dists*4 < ctxts.size())
-    THROW_ERROR("Absolute discounting heuristic expects 4 context features for each dist");
+    THROW_ERROR("Absolute discounting heuristic expects 4 context features for each dist, but num_dists=" << num_dists << ", ctxts.size=" << ctxts.size());
   vector<float> ret(num_dists, 0.0);
   float left = 1.0;
   int ngram_dists = ctxts.size()/4;
@@ -25,7 +25,7 @@ std::vector<float> HeuristicAbs::smooth(int num_dists, const std::vector<float> 
 
 std::vector<float> HeuristicWb::smooth(int num_dists, const std::vector<float> & ctxts) {
   if(ctxts.size() % 3 != 0 || num_dists*3 < ctxts.size())
-    THROW_ERROR("Witten bell heuristic expects 3 context features for each dist");
+    THROW_ERROR("Witten bell heuristic expects 3 context features for each dist, but num_dists=" << num_dists << ", ctxts.size=" << ctxts.size());
   vector<float> ret(num_dists, 0.0);
   float left = 1.0;
   int ngram_dists = ctxts.size()/3;

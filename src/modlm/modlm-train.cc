@@ -702,10 +702,13 @@ int ModlmTrain::main(int argc, char** argv) {
   weight_decay_ = vm["weight_decay"].as<float>();
 
   // Create a heuristic if using one
-  if(vm["heuristic"].as<string>() != "")
-    heuristic_ = HeuristicFactory::create_heuristic(vm["heuristic"].as<string>());
   if(vm["whiten"].as<string>() != "")
     whitener_.reset(new Whitener(vm["whiten"].as<string>(), vm["whiten_eps"].as<float>()));
+  if(vm["heuristic"].as<string>() != "") {
+    max_minibatch_ = 1;
+    whitener_.reset((Whitener*)NULL);
+    heuristic_ = HeuristicFactory::create_heuristic(vm["heuristic"].as<string>());
+  }
 
   // Calculate the number of layers
   hidden_spec_ = BuilderSpec(vm["layers"].as<string>());
