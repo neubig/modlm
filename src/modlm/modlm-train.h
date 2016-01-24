@@ -70,6 +70,7 @@ protected:
   template <class Data, class Instance>
   float calc_dataset(const Data & data, bool update, std::pair<int,int> epoch, int my_range = 0);
   
+  void calc_prob();
 
   // *** Functions to create the dataset
 
@@ -124,7 +125,7 @@ protected:
   std::vector<std::vector<unsigned> > dropout_spans_;
 
   std::vector<std::vector<std::string> > model_locs_;
-  std::vector<std::string> train_files_, test_files_;
+  std::vector<std::string> train_files_, test_files_, prob_out_files_;
   std::string valid_file_;
 
   SequenceIndexer<std::vector<float> > dist_indexer_, ctxt_indexer_;

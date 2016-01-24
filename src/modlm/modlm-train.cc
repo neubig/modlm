@@ -589,6 +589,79 @@ void ModlmTrain::perform_training() {
 
 }
 
+void ModlmTrain::calc_prob() {
+
+  float uniform_prob = 1.0/dict_->size();
+  float unk_prob = (penalize_unk_ ? uniform_prob : 1);
+
+  // Create and allocate the targets:
+  string line;
+
+  for(size_t fid = 0; fid < test_files_.size(); fid++) {
+    // Open the input file
+    auto & file_name = test_files_[fid];
+    ifstream in(file_name);
+    if(!in) THROW_ERROR("Could not open in calc_prob: " << file_name);
+    // Open the probability output file if exists
+    shared_ptr<ofstream> prob_out;
+    if(prob_out_files_.size() > fid) {
+      auto & prob_name = test_files_[fid];
+      prob_out.reset(new ofstream(prob_name));
+      if(!*prob_out) THROW_ERROR("Could not open in prob_out: " << prob_name);
+    }
+
+    // Load counts
+    float total_loss = 0;
+    pair<int,int> total_words(0,0);
+    while(getline(in, line)) {
+      cnn::ComputationGraph cg;
+      V_expr_ = parameter(cg, V_);
+      a_expr_ = parameter(cg, a_);
+      if(builder_.get() != NULL) {
+        builder_->new_graph(cg);
+        builder_->start_new_sequence();
+      }
+      vector<float> losses;
+      // The things we'll need to return
+      Sentence sent = ParseSentence(line, dict_, true);
+      std::vector<std::pair<std::vector<float>, DistTarget> > ctxt_dists;
+      // Start with empty context at the beginning of the sentence
+      Sentence my_ngram(max_ctxt_, 1);
+      vector<Sentence> ngram(1, my_ngram);
+      // For each word in the sentence
+      for(size_t i = 0; i < sent.size(); i++) {
+        std::vector<float> ctxt_dense(num_ctxt_,0.f), trg_dense(num_dense_dist_+num_sparse_dist_,0.f), cnts(1,1.f);
+        if(sent[i] == 0) total_words.second++;
+        total_words.first++;
+        // Calculate the dense context features
+        int curr_ctxt = 0;
+        for(auto dist : dists_) {
+          assert(dist.get() != NULL);
+          dist->calc_ctxt_feats(ngram[0], &ctxt_dense[curr_ctxt]);
+          curr_ctxt += dist->get_ctxt_size();
+        }
+        // Change to the n-gram and calculate the distribution for it
+        ngram[0].push_back(sent[i]); 
+        std::vector<std::pair<int,float> > trg_sparse;
+        int dense_offset = 0, sparse_offset = 0;
+        for(auto dist : dists_)
+          dist->calc_word_dists(ngram[0], uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
+        for(auto & elem : trg_sparse) trg_dense[dense_offset + elem.first] = elem.second;
+        // Calculate the graph
+        float loss = as_scalar(add_to_graph(1, ctxt_dense, ngram, trg_dense, cnts, false, cg).value());
+        losses.push_back(loss);
+        total_loss += loss;
+        // Reduce the last word in the context
+        ngram[0].erase(ngram[0].begin());
+      }
+      if(prob_out.get() != NULL)
+        *prob_out << print_vec(losses) << endl;
+    }
+    cout << "ppl=" << exp(total_loss/total_words.first) << " unk=" << total_words.second << ": " << file_name << endl;
+  }
+
+}
+
 // *************** Sanity check code
 
 void ModlmTrain::sanity_check_aggregate(const SequenceIndexer<Sentence> & my_counts, float uniform_prob, float unk_prob) {
@@ -645,8 +718,10 @@ int ModlmTrain::main(int argc, char** argv) {
       ("model_in", po::value<string>()->default_value(""), "If resuming training, read the model in")
       ("model_out", po::value<string>()->default_value(""), "File to write the model to")
       ("online_epochs", po::value<int>()->default_value(-1), "Number of epochs of online learning to perform before switching to batch (-1: only online)")
+      ("operation", po::value<string>()->default_value("train"), "What operation to perform ('train' for training, 'prob' to calculate probabilities of the test set)")
       ("node_dropout_prob", po::value<float>()->default_value(0.0), "How much dropout to cause the LSTM to do")
       ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
+      ("prob_out", po::value<string>()->default_value(""), "File to write the probabilities")
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("rate_thresh",  po::value<float>()->default_value(1e-5), "Threshold for the learning rate")
       ("test_file", po::value<string>()->default_value(""), "One or more testing files split with pipes")
@@ -695,11 +770,13 @@ int ModlmTrain::main(int argc, char** argv) {
   clipping_enabled_ = vm["clipping_enabled"].as<bool>();
   training_type_ = vm["training_type"].as<string>();
   rate_decay_ = vm["rate_decay"].as<float>();
+  model_in_file_ = vm["model_in"].as<string>();
   model_out_file_ = vm["model_out"].as<string>();
   model_dropout_prob_ = vm["model_dropout_prob"].as<float>();
   model_dropout_decay_ = vm["model_dropout_decay"].as<float>();
   node_dropout_prob_ = vm["node_dropout_prob"].as<float>();
   weight_decay_ = vm["weight_decay"].as<float>();
+  string operation = vm["operation"].as<string>();
 
   // Create a heuristic if using one
   if(vm["whiten"].as<string>() != "")
@@ -736,6 +813,12 @@ int ModlmTrain::main(int argc, char** argv) {
   valid_file_ = vm["valid_file"].as<string>();
   boost::split(test_files_, vm["test_file"].as<string>(), boost::is_any_of("|"));
   if(test_files_.size() < 1 || test_files_[0] == "") THROW_ERROR("Must specify at least one --test_file");
+
+  // Get the files to write probabilities to
+  if(vm["prob_out"].as<string>() != "") {
+    boost::split(prob_out_files_, vm["prob_out"].as<string>(), boost::is_any_of("|"));
+    if(prob_out_files_.size() > 0 || prob_out_files_.size() != test_files_.size()) THROW_ERROR("Number of --prob_out files must be the same as the number of test files");
+  }
 
   cout << "Reading vocabulary... (s=" << time_.Elapsed() << ")" << endl;
 
@@ -822,13 +905,27 @@ int ModlmTrain::main(int argc, char** argv) {
   }
   a_ = mod_->add_parameters({(unsigned int)num_dist});
 
+  // Open the input model
+  if(model_in_file_ != "") {
+    ifstream in(model_in_file_.c_str());
+    if(!in) THROW_ERROR("Could not open input file: " << model_in_file_);
+    boost::archive::text_iarchive ia(in);
+    ia >> *mod_;
+  }
+
   // Actually perform training
-  if(training_type_ == "agg") {
-    perform_training<IndexedAggregateDataMap,IndexedAggregateData,IndexedAggregateInstance>();
-  } else if(training_type_ == "sent") {
-    perform_training<int,IndexedSentenceData,IndexedSentenceInstance>();
+  if(operation == "train") {
+    if(training_type_ == "agg") {
+      perform_training<IndexedAggregateDataMap,IndexedAggregateData,IndexedAggregateInstance>();
+    } else if(training_type_ == "sent") {
+      perform_training<int,IndexedSentenceData,IndexedSentenceInstance>();
+    } else {
+      THROW_ERROR("Illegal training type: " << training_type_);
+    }
+  } else if(operation == "prob") {
+    calc_prob();
   } else {
-    THROW_ERROR("Illegal training type");
+    THROW_ERROR("Illegal operation: " << operation);
   }
 
   return 0;
