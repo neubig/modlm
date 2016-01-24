@@ -26,6 +26,25 @@ inline void load_probs(const std::string & filename, vector<float> & probs) {
     probs.push_back(exp(-fl));
 }
 
+inline float accumulate(const vector<vector<float> > & probs, const vector<float> & coeff, vector<float> & coeff_new) {
+  size_t num_dists = probs.size();
+  vector<float> tmp_prob(num_dists, 0.f);
+  size_t num_wds = probs[0].size();
+  float loglik = 0.f, tot;
+  size_t did;
+  assert(coeff.size() == coeff_new.size());
+  for(float & c : coeff_new) c = 0.f;
+  for(size_t wid = 0; wid < num_wds; ++wid) {
+    tot = 0;
+    for(did = 0; did < num_dists; ++did)
+      tot += (tmp_prob[did] = probs[did][wid] * coeff[did]);
+    for(did = 0; did < num_dists; ++did)
+      coeff_new[did] += tmp_prob[did]/tot;
+    loglik -= log(tot);
+  }
+  return loglik;
+}
+
 int InterpProbs::main(int argc, char** argv) {
   po::options_description desc("*** interp-probs (by Graham Neubig) ***");
   desc.add_options()
@@ -65,32 +84,24 @@ int InterpProbs::main(int argc, char** argv) {
     }
   }
   const size_t num_dists = train_probs.size();
-  const size_t num_wds = train_probs[0].size();
-  cerr << "num_dists==" << num_dists << ", num_wds==" << num_wds << endl;
-  vector<float> coeff(num_dists, 1.f/num_dists);
-  vector<float> tmp_prob(num_dists, 0.f);
+  vector<float> coeff(num_dists, 1.f/num_dists), coeff_new(num_dists), coeff_tmp(num_dists);
 
   // Perform EM
   int epochs = vm_["epochs"].as<int>();
-  float loglik, tot;
-  size_t did;
+  float loglik;
   for(int epoch = 0; epoch < epochs; ++epoch) {
-    vector<float> coeff_new(num_dists, 0.f);
-    loglik = 0;
-    for(size_t wid = 0; wid < num_wds; ++wid) {
-      tot = 0;
-      for(did = 0; did < num_dists; ++did)
-        tot += (tmp_prob[did] = train_probs[did][wid] * coeff[did]);
-      for(did = 0; did < num_dists; ++did)
-        coeff_new[did] += tmp_prob[did]/tot;
-      loglik -= log(tot);
+    // Calculate and print training
+    loglik = accumulate(train_probs, coeff, coeff_new);
+    cerr << "trn  epoch " << epoch+1 << ": ppl=" << exp(loglik/train_probs[0].size()) << ", coeff:"; for(float f : coeff) cerr << ' ' << f; cerr << endl;
+    // Calculate and print all tests
+    for(size_t tid = 0; tid < test_probs.size(); ++tid) {
+      loglik = accumulate(test_probs[tid], coeff, coeff_tmp);
+      cerr << "tst" << tid << " epoch " << epoch+1 << ": ppl=" << exp(loglik/test_probs[tid][0].size()) << endl;
     }
-    // Print status
-    cerr << "Epoch " << epoch+1 << ": ppl=" << exp(loglik/num_wds) << ", coeff:";
-    for(float f : coeff) cerr << ' ' << f;
-    cerr << endl;
     // Create new coefficients
-    for(did = 0, tot = 0.f; did < num_dists; ++did)
+    float tot = 0.f;
+    size_t did;
+    for(did = 0; did < num_dists; ++did)
       tot += coeff_new[did];
     for(did = 0; did < num_dists; ++did)
       coeff[did] = coeff_new[did]/tot;
