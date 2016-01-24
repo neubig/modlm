@@ -617,7 +617,7 @@ void ModlmTrain::calc_prob() {
     // Open the probability output file if exists
     shared_ptr<ofstream> prob_out;
     if(prob_out_files_.size() > fid) {
-      auto & prob_name = test_files_[fid];
+      auto & prob_name = prob_out_files_[fid];
       prob_out.reset(new ofstream(prob_name));
       if(!*prob_out) THROW_ERROR("Could not open in prob_out: " << prob_name);
     }
@@ -652,6 +652,7 @@ void ModlmTrain::calc_prob() {
           dist->calc_ctxt_feats(ngram[0], &ctxt_dense[curr_ctxt]);
           curr_ctxt += dist->get_ctxt_size();
         }
+        if(whitener_.get() != NULL) whitener_->whiten(ctxt_dense);
         // Change to the n-gram and calculate the distribution for it
         ngram[0].push_back(sent[i]); 
         std::vector<std::pair<int,float> > trg_sparse;
@@ -825,7 +826,7 @@ int ModlmTrain::main(int argc, char** argv) {
   vector<string> wildcards;
   boost::split(wildcards, vm["wildcards"].as<string>(), boost::is_any_of(" "));
   train_files_ = split_wildcarded(vm["train_file"].as<string>(), wildcards, "|", true);
-  if(train_files_.size() < 1 || train_files_[0] == "") THROW_ERROR("Must specify at least one --train_file");
+  if(operation == "train" && (train_files_.size() < 1 || train_files_[0] == "")) THROW_ERROR("Must specify at least one --train_file when performing training");
   valid_file_ = vm["valid_file"].as<string>();
   boost::split(test_files_, vm["test_file"].as<string>(), boost::is_any_of("|"));
   if(test_files_.size() < 1 || test_files_[0] == "") THROW_ERROR("Must specify at least one --test_file");
@@ -833,7 +834,7 @@ int ModlmTrain::main(int argc, char** argv) {
   // Get the files to write probabilities to
   if(vm["prob_out"].as<string>() != "") {
     boost::split(prob_out_files_, vm["prob_out"].as<string>(), boost::is_any_of("|"));
-    if(prob_out_files_.size() > 0 || prob_out_files_.size() != test_files_.size()) THROW_ERROR("Number of --prob_out files must be the same as the number of test files");
+    if(prob_out_files_.size() > 0 && prob_out_files_.size() != test_files_.size()) THROW_ERROR("Number of --prob_out files (" << prob_out_files_.size() << ") must be the same as the number of test files (" << test_files_.size() << ")");
   }
 
   cout << "Reading vocabulary... (s=" << time_.Elapsed() << ")" << endl;

@@ -12,6 +12,7 @@ public:
   void calc_matrix(const std::vector<std::vector<float> > & data, const std::vector<int> & use_in_training);
   // Perform whitening
   void whiten(std::vector<std::vector<float> > & data);
+  void whiten(std::vector<float> & data);
   void save(const std::string & filename) const;
   void load(const std::string & filename);
 

@@ -77,6 +77,19 @@ void Whitener::calc_matrix(const std::vector<std::vector<float> > & data, const 
     THROW_ERROR("Illegal whitener type: " << type_);
   }
 }
+// Perform whitening of a single vector
+void Whitener::whiten(std::vector<float> & my_data) {
+  if(type_ == "") return;
+  int data_cols = mean_vec_.size();
+  Map<const RowVectorXf> X_mean(&mean_vec_[0], data_cols);
+  Map<RowVectorXf> x(&my_data[0], data_cols);
+  if(type_ == "mean") {
+    x = (x - X_mean);
+  } else {
+    Map<const MatrixXf> W(&rotation_vec_[0], data_cols, data_cols);
+    x = (x - X_mean) * W;
+  }
+}
 // Perform whitening
 void Whitener::whiten(std::vector<std::vector<float> > & data) {
   if(type_ == "") return;
