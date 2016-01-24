@@ -94,6 +94,7 @@ protected:
 
   int epochs_;
   std::string model_in_file_, model_out_file_;
+  std::string whitener_in_file_, whitener_out_file_;
 
   ModelPtr mod_;
   DictPtr dict_;

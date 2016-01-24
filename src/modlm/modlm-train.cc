@@ -534,8 +534,13 @@ void ModlmTrain::perform_training() {
   if(whitener_.get() != NULL) {
     std::vector<int> to_whiten(ctxt_inverter_.size());
     check_to_whiten(train_data, to_whiten);
-    whitener_->calc_matrix(ctxt_inverter_, to_whiten);
+    if(whitener_in_file_ != "")
+      whitener_->load(whitener_in_file_);
+    else
+      whitener_->calc_matrix(ctxt_inverter_, to_whiten);
     whitener_->whiten(ctxt_inverter_);
+    if(whitener_out_file_ != "")
+      whitener_->save(whitener_out_file_);
   }
 
   // Train a neural network to predict_ the interpolation coefficients
@@ -596,6 +601,13 @@ void ModlmTrain::calc_prob() {
 
   // Create and allocate the targets:
   string line;
+
+  // Load the whitener if present
+  if(whitener_.get() != NULL) {
+    if(whitener_in_file_ == "")
+      THROW_ERROR("If a whitener is specified at probability calculation time, it must be loaded from a file");
+    whitener_->load(whitener_in_file_);
+  }
 
   for(size_t fid = 0; fid < test_files_.size(); fid++) {
     // Open the input file
@@ -735,6 +747,8 @@ int ModlmTrain::main(int argc, char** argv) {
       ("weight_decay", po::value<float>()->default_value(1e-6), "How much weight decay to perform")
       ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
       ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
+      ("whitener_out", po::value<string>()->default_value(""), "The file to save the whitener to")
+      ("whitener_in", po::value<string>()->default_value(""), "The file to load the whitener from")
       ("wildcards", po::value<string>()->default_value(""), "Wildcards in model/data names for cross validation")
       ("word_hist", po::value<int>()->default_value(0), "Word history length")
       ("word_rep", po::value<int>()->default_value(50), "Word representation size")
@@ -772,6 +786,8 @@ int ModlmTrain::main(int argc, char** argv) {
   rate_decay_ = vm["rate_decay"].as<float>();
   model_in_file_ = vm["model_in"].as<string>();
   model_out_file_ = vm["model_out"].as<string>();
+  whitener_in_file_ = vm["whitener_in"].as<string>();
+  whitener_out_file_ = vm["whitener_out"].as<string>();
   model_dropout_prob_ = vm["model_dropout_prob"].as<float>();
   model_dropout_decay_ = vm["model_dropout_decay"].as<float>();
   node_dropout_prob_ = vm["node_dropout_prob"].as<float>();

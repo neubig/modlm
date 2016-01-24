@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <boost/range/irange.hpp>
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues> 
@@ -96,4 +97,30 @@ void Whitener::whiten(std::vector<std::vector<float> > & data) {
       x = (x - X_mean) * W;
     }
   }
+}
+
+// Save/load the model
+void Whitener::save(const std::string & filename) const {
+  ofstream out(filename);
+  if(!out) THROW_ERROR("Could not save whitener to " << filename);
+  out << type_ << endl;
+  if(mean_vec_.size() > 0) out << mean_vec_[0];
+  for(size_t i = 1; i < mean_vec_.size(); i++) out << ' ' << mean_vec_[i];
+  out << endl;
+  if(rotation_vec_.size() > 0) out << rotation_vec_[0];
+  for(size_t i = 1; i < rotation_vec_.size(); i++) out << ' ' << rotation_vec_[i];
+  out << endl;
+}
+void Whitener::load(const std::string & filename) {
+  ifstream in(filename);
+  if(!in) THROW_ERROR("Could not read whitener from " << filename);
+  string line2, line3;
+  if(!(getline(in, type_) && getline(in, line2) && getline(in, line3)))
+    THROW_ERROR("Malformed whitener file");
+  float fl;
+  mean_vec_.resize(0); rotation_vec_.resize(0);
+  istringstream iss2(line2);
+  while(iss2 >> fl) mean_vec_.push_back(fl);
+  istringstream iss3(line3);
+  while(iss3 >> fl) rotation_vec_.push_back(fl);
 }
