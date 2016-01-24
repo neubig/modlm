@@ -3,6 +3,7 @@
 LIBCPP = \
   modlm-train.cc \
   dist-train.cc \
+  interp-probs.cc \
   dist-ngram.cc \
   counts.cc \
   whitener.cc \
@@ -38,10 +39,13 @@ LDADD=libmodlm.la \
     $(BOOST_IOSTREAMS_LIB) \
     $(OPENMP_CXXFLAGS)
 
-bin_PROGRAMS = modlm-train dist-train
+bin_PROGRAMS = modlm-train dist-train interp-probs
 
 modlm_train_SOURCES = modlm-train-main.cc
 modlm_train_LDADD = $(LDADD)
 
 dist_train_SOURCES = dist-train-main.cc
 dist_train_LDADD = $(LDADD)
+
+interp_probs_SOURCES = interp-probs-main.cc
+interp_probs_LDADD = $(LDADD)

@@ -36,6 +36,7 @@ gmon.out
 missing
 src/modlm/dist-train
 src/modlm/modlm-train
+src/modlm/interp-probs
 src/modlm/modlm
 src/modlm/config.h
 src/test/test-modlm
