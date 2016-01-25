@@ -561,12 +561,13 @@ void ModlmTrain::perform_training() {
       calc_dataset<Data,Instance>(train_data, true, epoch_pair, range-1);
       if(online_epochs_ != -1 && epoch > online_epochs_)
         trainer_->update();
-      trainer_->update_epoch();
       // Perform testing
       if(valid_data.size() != 0) {
         float valid_loss = calc_dataset<Data,Instance>(valid_data, false, epoch_pair);
-        if(rate_decay_ != 1.0 && last_valid < valid_loss)
+        if(rate_decay_ != 1.0 && last_valid < valid_loss) {
           trainer_->eta0 *= rate_decay_;
+          trainer_->eta *= rate_decay_;
+        }
         last_valid = valid_loss;
         // Open the output model
         if(best_valid > valid_loss && model_out_file_ != "") {
@@ -580,6 +581,7 @@ void ModlmTrain::perform_training() {
       for(size_t i = 0; i < test_data.size(); i++)
         calc_dataset<Data,Instance>(test_data[i], false, epoch_pair);
     }
+    trainer_->update_epoch();
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
       trainer_ = get_trainer(trainer_id_, learning_rate_, weight_decay_, *mod_);
@@ -638,8 +640,8 @@ void ModlmTrain::calc_prob() {
       Sentence sent = ParseSentence(line, dict_, true);
       std::vector<std::pair<std::vector<float>, DistTarget> > ctxt_dists;
       // Start with empty context at the beginning of the sentence
-      Sentence my_ngram(max_ctxt_, 1);
-      vector<Sentence> ngram(1, my_ngram);
+      Sentence ngram(max_ctxt_, 1), my_wordhist(word_hist_, 1);
+      vector<Sentence> wordhist(1, my_wordhist);
       // For each word in the sentence
       for(size_t i = 0; i < sent.size(); i++) {
         std::vector<float> ctxt_dense(num_ctxt_,0.f), trg_dense(num_dense_dist_+num_sparse_dist_,0.f), cnts(1,1.f);
@@ -649,23 +651,25 @@ void ModlmTrain::calc_prob() {
         int curr_ctxt = 0;
         for(auto dist : dists_) {
           assert(dist.get() != NULL);
-          dist->calc_ctxt_feats(ngram[0], &ctxt_dense[curr_ctxt]);
+          dist->calc_ctxt_feats(ngram, &ctxt_dense[curr_ctxt]);
           curr_ctxt += dist->get_ctxt_size();
         }
         if(whitener_.get() != NULL) whitener_->whiten(ctxt_dense);
         // Change to the n-gram and calculate the distribution for it
-        ngram[0].push_back(sent[i]); 
+        ngram.push_back(sent[i]); 
         std::vector<std::pair<int,float> > trg_sparse;
         int dense_offset = 0, sparse_offset = 0;
         for(auto dist : dists_)
-          dist->calc_word_dists(ngram[0], uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
+          dist->calc_word_dists(ngram, uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
         for(auto & elem : trg_sparse) trg_dense[dense_offset + elem.first] = elem.second;
         // Calculate the graph
-        float loss = as_scalar(add_to_graph(1, ctxt_dense, ngram, trg_dense, cnts, false, cg).value());
+        float loss = as_scalar(add_to_graph(1, ctxt_dense, wordhist, trg_dense, cnts, false, cg).value());
         losses.push_back(loss);
         total_loss += loss;
         // Reduce the last word in the context
-        ngram[0].erase(ngram[0].begin());
+        wordhist[0].push_back(sent[i]); 
+        wordhist[0].erase(wordhist[0].begin());
+        ngram.erase(ngram.begin());
       }
       if(prob_out.get() != NULL)
         *prob_out << print_vec(losses) << endl;
