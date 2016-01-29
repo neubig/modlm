@@ -330,7 +330,7 @@ void ModlmTrain::finalize_data<IndexedAggregateDataMap,IndexedAggregateData>(con
 }
 
 template <>
-pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateData>(const string & file_name, IndexedAggregateDataMap & data, IndexedAggregateData &) {
+pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateData>(const string & file_name, IndexedAggregateDataMap & data, IndexedAggregateData & final_data) {
 
   float uniform_prob = 1.0/dict_->size();
   float unk_prob = (penalize_unk_ ? uniform_prob : 1);
@@ -352,9 +352,8 @@ pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateDa
   // // Perform a sanity check
   // sanity_check_aggregate(my_counts, uniform_prob, unk_prob);
 
-  // Create training data (num words, ctxt features, each model, true counts)
-  pair<int,int> total_words(0,0);
-  // Create and allocate the targets:
+  // Create training data
+  std::pair<int,int> total_words(0,0);
   std::vector<float> ctxt_dense(num_ctxt_), trg_dense(num_dense_dist_);
   std::vector<WordId> ctxt_sparse(word_hist_);
   // Loop through each of the contexts
@@ -382,7 +381,9 @@ pair<int,int> ModlmTrain::create_data<IndexedAggregateDataMap,IndexedAggregateDa
     data[full_ctxt][full_trg] += kv.second;
     total_words.first += kv.second;
     if(*kv.first.rbegin() == 0) total_words.second += kv.second;
-  } 
+  }
+  final_data.all_words += total_words.first; 
+  final_data.unk_words += total_words.second; 
 
   return total_words;
 }
@@ -460,6 +461,8 @@ pair<int,int> ModlmTrain::create_data<int,IndexedSentenceData>(const string & fi
     }
     data.push_back(make_pair(sent, ctxt_dists));
   }
+  data.all_words += total_words.first; 
+  data.unk_words += total_words.second; 
 
   return total_words;
 }
@@ -543,7 +546,7 @@ void ModlmTrain::perform_training() {
       whitener_->save(whitener_out_file_);
   }
 
-  // Train a neural network to predict_ the interpolation coefficients
+  // Train a neural network to predict the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; epoch++) { 
     std::shuffle(train_data.curr_order.begin(), train_data.curr_order.end(), *cnn::rndeng);
@@ -558,9 +561,28 @@ void ModlmTrain::perform_training() {
         cout << ", dropout=" << min(model_dropout_prob_, 1.0f);
       cout << " (s=" << time_.Elapsed() << ")" << endl;
       // Perform training
-      calc_dataset<Data,Instance>(train_data, true, epoch_pair, range-1);
-      if(online_epochs_ != -1 && epoch > online_epochs_)
+      float train_loss = calc_dataset<Data,Instance>(train_data, true, epoch_pair, range-1);
+      // Do batch update and regularization if necessary
+      if(online_epochs_ != -1 && epoch > online_epochs_) {
+        if(batch_regularizer_ != 0.0) {
+          vector<cnn::expr::Expression> losses;
+          cnn::ComputationGraph cg;
+          for(auto & param : mod_->parameters_list()) {
+            Expression my_param = parameter(cg, param);
+            losses.push_back(squared_norm(my_param));
+          }
+          for(auto & param : mod_->lookup_parameters_list()) {
+            vector<unsigned> ids(param->values.size());
+            std::iota(ids.begin(), ids.end(), 0);
+            losses.push_back(sum_batches(squared_norm(lookup(cg, param, ids))));
+          }
+          float train_norm = cnn::as_scalar((sum(losses) * batch_regularizer_).value());
+          float train_obj = train_loss+train_norm, log2 = train_data.all_words*log(2);
+          cg.backward();
+          cerr << "trn  epoch " << epoch << ": regppl=" << exp(train_obj/train_data.all_words) << " loss=" << train_loss/log2 << ", l2=" << train_norm/log2 << ", obj=" << train_obj/log2 << endl;
+        }
         trainer_->update();
+      }
       // Perform testing
       if(valid_data.size() != 0) {
         float valid_loss = calc_dataset<Data,Instance>(valid_data, false, epoch_pair);
@@ -750,6 +772,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("verbose", po::value<int>()->default_value(0), "How much verbose output to print")
       ("vocab_file", po::value<string>()->default_value(""), "Vocab file")
       ("weight_decay", po::value<float>()->default_value(1e-6), "How much weight decay to perform")
+      ("batch_regularizer", po::value<float>()->default_value(0.0), "Regularization on batch updates")
       ("whiten", po::value<string>()->default_value(""), "Type of whitening (mean/pca/zca)")
       ("whiten_eps", po::value<float>()->default_value(0.01), "Regularization for whitening")
       ("whitener_out", po::value<string>()->default_value(""), "The file to save the whitener to")
@@ -797,6 +820,7 @@ int ModlmTrain::main(int argc, char** argv) {
   model_dropout_decay_ = vm["model_dropout_decay"].as<float>();
   node_dropout_prob_ = vm["node_dropout_prob"].as<float>();
   weight_decay_ = vm["weight_decay"].as<float>();
+  batch_regularizer_ = vm["batch_regularizer"].as<float>();
   string operation = vm["operation"].as<string>();
 
   // Create a heuristic if using one

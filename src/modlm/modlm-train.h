@@ -122,7 +122,7 @@ protected:
   bool hold_out_;
   float model_dropout_prob_, model_dropout_decay_;
   float node_dropout_prob_;
-  float weight_decay_;
+  float weight_decay_, batch_regularizer_;
   std::vector<std::vector<unsigned> > dropout_spans_;
 
   std::vector<std::vector<std::string> > model_locs_;
