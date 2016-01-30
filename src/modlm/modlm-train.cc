@@ -49,12 +49,21 @@ void ModlmTrain::print_status(const std::string & strid, std::pair<int,int> epoc
   float ppl = exp(loss/words.first);
   float ppl_nounk = exp((loss + words.second * log_unk_prob_)/words.first);
   float wps = words.first / elapsed;
+  // Print the basic statistics
   cout << strid << " epoch " << epoch.first;
   if(epoch.second != 0) cout << "-" << epoch.second;
   if(percent >= 0) cout << " (" << percent << "%)";
   cout << ": ppl=" << ppl << "   (";
   if(penalize_unk_ && words.second != -1) cout << "ppl_nounk=" << ppl_nounk << ", ";
   cout << "s=" << elapsed << ", wps=" << wps << ")" << endl;
+  // Print the interpolation vector
+  if(print_interp_ > 0 && percent < 0.f) {
+    cout << strid << " epoch " << epoch.first;
+    if(epoch.second != 0) cout << "-" << epoch.second;
+    float interp_sum = std::accumulate(print_interp_vec_.begin(), print_interp_vec_.end(), 0);
+    for(float & val : print_interp_vec_) val /= interp_sum;
+    cout << ": interp=" << print_vec(print_interp_vec_) << endl;
+  }
 }
 
 inline std::vector<std::string> split_wildcarded(const std::string & str, const std::vector<std::string> & wildcards, const std::string & delimiter, bool skip_first_wildcard) {
@@ -149,6 +158,14 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
     else 
       interp = exp( log_softmax( softmax_input, dropout_spans_[dropout_set] ) );
 
+  }
+
+  // If we're printing interpolation coefficients, then add the values
+  if(print_interp_ > 0) {
+    vector<float> my_interp = as_vector((mb_num_sent > 1 ? sum_batches(interp) : interp).value());
+    assert(print_interp_vec_.size() == my_interp.size());
+    for(unsigned i = 0; i < my_interp.size(); i++)
+      print_interp_vec_[i] += my_interp[i];
   }
 
   Expression probs = input(cg, cnn::Dim({(unsigned int)num_dist, (unsigned int)num_words}, mb_num_sent), out_dists);
@@ -293,6 +310,7 @@ float ModlmTrain::calc_dataset(const Data & data, bool update, std::pair<int,int
     THROW_ERROR("Non-zero dropout prob for layer type '" << hidden_spec_.type << "' that doesn't support it");
 
   float loss = 0.0, print_every = 60.0, elapsed;
+  std::fill(print_interp_vec_.begin(), print_interp_vec_.end(), 0.f);
   float last_print = 0;
   Timer time;
   pair<int,int> curr_words(0,0);
@@ -761,6 +779,7 @@ int ModlmTrain::main(int argc, char** argv) {
       ("node_dropout_prob", po::value<float>()->default_value(0.0), "How much dropout to cause the LSTM to do")
       ("penalize_unk", po::value<bool>()->default_value(true), "Whether to penalize unknown words")
       ("prob_out", po::value<string>()->default_value(""), "File to write the probabilities")
+      ("print_interp", po::value<int>()->default_value(0), "Print the interpolation coefficients for 0=nothing, 1=every epoch, 2=every word")
       ("rate_decay", po::value<float>()->default_value(1.0), "How much to decay learning rate when validation likelihood decreases")
       ("rate_thresh",  po::value<float>()->default_value(1e-5), "Threshold for the learning rate")
       ("test_file", po::value<string>()->default_value(""), "One or more testing files split with pipes")
@@ -818,6 +837,7 @@ int ModlmTrain::main(int argc, char** argv) {
   whitener_out_file_ = vm["whitener_out"].as<string>();
   model_dropout_prob_ = vm["model_dropout_prob"].as<float>();
   model_dropout_decay_ = vm["model_dropout_decay"].as<float>();
+  print_interp_ = vm["print_interp"].as<int>();
   node_dropout_prob_ = vm["node_dropout_prob"].as<float>();
   weight_decay_ = vm["weight_decay"].as<float>();
   batch_regularizer_ = vm["batch_regularizer"].as<float>();
@@ -949,6 +969,9 @@ int ModlmTrain::main(int argc, char** argv) {
     V_ = mod_->add_parameters({(unsigned int)num_dist, (unsigned int)last_size});
   }
   a_ = mod_->add_parameters({(unsigned int)num_dist});
+
+  // Resize the interpolation vector
+  if(print_interp_ > 0) print_interp_vec_.resize(num_dist);
 
   // Open the input model
   if(model_in_file_ != "") {

@@ -125,6 +125,9 @@ protected:
   float weight_decay_, batch_regularizer_;
   std::vector<std::vector<unsigned> > dropout_spans_;
 
+  int print_interp_;
+  std::vector<float> print_interp_vec_;
+
   std::vector<std::vector<std::string> > model_locs_;
   std::vector<std::string> train_files_, test_files_, prob_out_files_;
   std::string valid_file_;
