@@ -169,7 +169,10 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
   }
 
   Expression probs = input(cg, cnn::Dim({(unsigned int)num_dist, (unsigned int)num_words}, mb_num_sent), out_dists);
-  // cerr << "interp: " << print_vec(cnn::as_vector(interp.value())) << endl;
+  if(print_interp_ > 1) {
+    if(mb_num_sent > 1) THROW_ERROR("Minibatched probability printing not supported yet");
+    cerr << "word_interp: " << print_vec(cnn::as_vector(interp.value())) << endl;
+  }
   // cerr << "probs: " << print_vec(cnn::as_vector(probs.value())) << endl;
   Expression nll = -log(transpose(probs) * interp);  
   // cerr << "nll: " << print_vec(cnn::as_vector(nll.value())) << endl;
