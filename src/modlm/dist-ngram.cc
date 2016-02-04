@@ -167,6 +167,12 @@ void DistNgram::finalize_stats() {
       discounts_[i][1] = 1 - 2.0*Y*fofs[i][2]/fofs[i][1];
       discounts_[i][2] = 2 - 3.0*Y*fofs[i][3]/fofs[i][2];
       discounts_[i][3] = 3 - 4.0*Y*fofs[i][4]/fofs[i][3];
+      for(size_t j = 1; j < 4; j++) {
+        if(discounts_[i][j] < 0) {
+          cerr << "WARNING: negative discount=" << discounts_[i][j] << ". Setting to 0.5." << endl;
+          discounts_[i][j] = 0.5;
+        }
+      }
     }
     // Perform discounting
     disc_ctxt_cnts_.resize(ctxt_cnts_.size());

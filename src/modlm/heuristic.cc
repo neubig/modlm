@@ -15,6 +15,7 @@ std::vector<float> HeuristicAbs::smooth(int num_dists, const std::vector<float> 
     if(ctxts[i*4] == 1.0) continue;
     // Discounted divided by total == amount for this dist
     float my_prob = exp(ctxts[i*4+3]-ctxts[i*4+1]);
+    if(my_prob > 1) THROW_ERROR("Discount exceeding 1: " << my_prob);
     ret[i] = my_prob * left;
     left *= (1-my_prob);
   }
