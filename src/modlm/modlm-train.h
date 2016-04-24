@@ -4,6 +4,7 @@
 #include <memory>
 #include <unordered_map>
 #include <cnn/expr.h>
+#include <cnn/model.h>
 #include <modlm/sentence.h>
 #include <modlm/timer.h>
 #include <modlm/training-data.h>
@@ -16,8 +17,6 @@ namespace cnn {
   class Dict;
   struct Trainer;
   struct ComputationGraph;
-  struct LookupParameters;
-  struct Parameters;
   struct RNNBuilder;
 }
 
@@ -45,7 +44,7 @@ private:
 public:
   ModlmTrain() : num_ctxt_(0), num_dense_dist_(0), num_sparse_dist_(0), word_hist_(0), word_rep_(50), use_context_(true), dist_indexer_(-1), ctxt_indexer_(-1) { }
 
-  TrainerPtr get_trainer(const std::string & trainer_id, float learning_rate, float weight_decay, cnn::Model & model);
+  TrainerPtr get_trainer(const std::string & trainer_id, float learning_rate, cnn::Model & model);
 
   int main(int argc, char** argv);
   
@@ -104,10 +103,10 @@ protected:
   TrainerPtr trainer_;
   BuilderSpec hidden_spec_;
 
-  cnn::LookupParameters* reps_;
+  cnn::LookupParameter reps_;
   BuilderPtr builder_;
-  cnn::Parameters* V_; cnn::expr::Expression V_expr_;
-  cnn::Parameters* a_; cnn::expr::Expression a_expr_;
+  cnn::Parameter V_; cnn::expr::Expression V_expr_;
+  cnn::Parameter a_; cnn::expr::Expression a_expr_;
 
   float log_unk_prob_;
   int max_ctxt_, num_ctxt_, num_dense_dist_, num_sparse_dist_;

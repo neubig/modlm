@@ -15,6 +15,7 @@
 #include <cnn/rnn.h>
 #include <cnn/lstm.h>
 #include <cnn/grad-check.h>
+#include <cnn/weight-decay.h>
 #include <modlm/modlm-train.h>
 #include <modlm/macros.h>
 #include <modlm/timer.h>
@@ -80,20 +81,20 @@ inline std::vector<std::string> split_wildcarded(const std::string & str, const 
   return ret;
 }
 
-ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float learning_rate, float weight_decay, cnn::Model & model) {
+ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float learning_rate, cnn::Model & model) {
     TrainerPtr trainer;
     if(trainer_id == "sgd") {
-        trainer.reset(new cnn::SimpleSGDTrainer(&model, weight_decay, learning_rate));
+        trainer.reset(new cnn::SimpleSGDTrainer(&model, learning_rate));
     } else if(trainer_id == "momentum") {
-        trainer.reset(new cnn::MomentumSGDTrainer(&model, weight_decay, learning_rate));
+        trainer.reset(new cnn::MomentumSGDTrainer(&model, learning_rate));
     } else if(trainer_id == "adagrad") {
-        trainer.reset(new cnn::AdagradTrainer(&model, weight_decay, learning_rate));
+        trainer.reset(new cnn::AdagradTrainer(&model, learning_rate));
     } else if(trainer_id == "adadelta") {
-        trainer.reset(new cnn::AdadeltaTrainer(&model, weight_decay, learning_rate));
+        trainer.reset(new cnn::AdadeltaTrainer(&model, learning_rate));
     } else if(trainer_id == "adam") {
-        trainer.reset(new cnn::AdamTrainer(&model, weight_decay, learning_rate));
+        trainer.reset(new cnn::AdamTrainer(&model, learning_rate));
     } else if(trainer_id == "rms") {
-        trainer.reset(new cnn::RmsPropTrainer(&model, weight_decay, learning_rate));
+        trainer.reset(new cnn::RmsPropTrainer(&model, learning_rate));
     } else {
         THROW_ERROR("Illegal trainer variety: " << trainer_id);
     }
@@ -586,23 +587,23 @@ void ModlmTrain::perform_training() {
       float train_loss = calc_dataset<Data,Instance>(train_data, true, epoch_pair, range-1);
       // Do batch update and regularization if necessary
       if(online_epochs_ != -1 && epoch > online_epochs_) {
-        if(batch_regularizer_ != 0.0) {
-          vector<cnn::expr::Expression> losses;
-          cnn::ComputationGraph cg;
-          for(auto & param : mod_->parameters_list()) {
-            Expression my_param = parameter(cg, param);
-            losses.push_back(squared_norm(my_param));
-          }
-          for(auto & param : mod_->lookup_parameters_list()) {
-            vector<unsigned> ids(param->values.size());
-            std::iota(ids.begin(), ids.end(), 0);
-            losses.push_back(sum_batches(squared_norm(lookup(cg, param, ids))));
-          }
-          float train_norm = cnn::as_scalar((sum(losses) * batch_regularizer_).value());
-          float train_obj = train_loss+train_norm, log2 = train_data.all_words*log(2);
-          cg.backward();
-          cerr << "trn  epoch " << epoch << ": regppl=" << exp(train_obj/train_data.all_words) << " loss=" << train_loss/log2 << ", l2=" << train_norm/log2 << ", obj=" << train_obj/log2 << endl;
-        }
+        // if(batch_regularizer_ != 0.0) {
+        //   vector<cnn::expr::Expression> losses;
+        //   cnn::ComputationGraph cg;
+        //   for(auto & param : mod_->parameters_list()) {
+        //     Expression my_param = parameter(cg, param);
+        //     losses.push_back(squared_norm(my_param));
+        //   }
+        //   for(auto & param : mod_->lookup_parameters_list()) {
+        //     vector<unsigned> ids(param->values.size());
+        //     std::iota(ids.begin(), ids.end(), 0);
+        //     losses.push_back(sum_batches(squared_norm(lookup(cg, param, ids))));
+        //   }
+        //   float train_norm = cnn::as_scalar((sum(losses) * batch_regularizer_).value());
+        //   float train_obj = train_loss+train_norm, log2 = train_data.all_words*log(2);
+        //   cg.backward();
+        //   cerr << "trn  epoch " << epoch << ": regppl=" << exp(train_obj/train_data.all_words) << " loss=" << train_loss/log2 << ", l2=" << train_norm/log2 << ", obj=" << train_obj/log2 << endl;
+        // }
         trainer_->update();
       }
       // Perform testing
@@ -628,7 +629,7 @@ void ModlmTrain::perform_training() {
     trainer_->update_epoch();
     // Reset the trainer after online learning
     if(epoch == online_epochs_) {
-      trainer_ = get_trainer(trainer_id_, learning_rate_, weight_decay_, *mod_);
+      trainer_ = get_trainer(trainer_id_, learning_rate_, *mod_);
       trainer_->clipping_enabled = clipping_enabled_;
       evaluate_frequency_ = 1;
       train_data.eval_ranges = {0, train_data.batch_ranges.size()-1};
@@ -844,8 +845,10 @@ int ModlmTrain::main(int argc, char** argv) {
   print_interp_ = vm["print_interp"].as<int>();
   node_dropout_prob_ = vm["node_dropout_prob"].as<float>();
   weight_decay_ = vm["weight_decay"].as<float>();
+  cnn::global_weight_decay.SetLambda(weight_decay_);
   batch_regularizer_ = vm["batch_regularizer"].as<float>();
-  string operation = vm["operation"].as<string>();
+  if(batch_regularizer_ != 0.f) THROW_ERROR("Batch regularization not implemented yet.");
+  string operation = vm["operation"].as<string>(); 
 
   // Create a heuristic if using one
   if(vm["whiten"].as<string>() != "")
@@ -954,7 +957,7 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Initialize
   mod_.reset(new cnn::Model);
-  trainer_ = get_trainer(trainer_id_, learning_rate_, weight_decay_, *mod_);
+  trainer_ = get_trainer(trainer_id_, learning_rate_, *mod_);
   trainer_->clipping_enabled = clipping_enabled_;
 
   float uniform_prob = 1.0/dict_->size();

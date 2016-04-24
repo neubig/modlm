@@ -20,8 +20,8 @@ FFBuilder::FFBuilder(unsigned layers,
                        Model* model) : layers(layers), dropout_rate(0.f) {
   unsigned layer_input_dim = input_dim;
   for (unsigned i = 0; i < layers; ++i) {
-    Parameters* p_x2h = model->add_parameters({hidden_dim, layer_input_dim});
-    Parameters* p_hb = model->add_parameters({hidden_dim});
+    Parameter p_x2h = model->add_parameters({hidden_dim, layer_input_dim});
+    Parameter p_hb = model->add_parameters({hidden_dim});
     params.push_back({p_x2h, p_hb});
     layer_input_dim = hidden_dim;
   }
@@ -30,8 +30,8 @@ FFBuilder::FFBuilder(unsigned layers,
 void FFBuilder::new_graph_impl(ComputationGraph& cg) {
   param_vars.clear();
   for (unsigned i = 0; i < layers; ++i) {
-    Parameters* p_x2h = params[i][X2H];
-    Parameters* p_hb = params[i][HB];
+    Parameter p_x2h = params[i][X2H];
+    Parameter p_hb = params[i][HB];
     Expression i_x2h =  parameter(cg,p_x2h);
     Expression i_hb =  parameter(cg,p_hb);
     vector<Expression> vars = {i_x2h, i_hb};
@@ -73,8 +73,8 @@ void FFBuilder::copy(const RNNBuilder & rnn) {
   const FFBuilder & rnn_simple = (const FFBuilder&)rnn;
   assert(params.size() == rnn_simple.params.size());
   for(size_t i = 0; i < rnn_simple.params.size(); ++i) {
-      params[i][0]->copy(*rnn_simple.params[i][0]);
-      params[i][1]->copy(*rnn_simple.params[i][1]);
+      params[i][0] = rnn_simple.params[i][0];
+      params[i][1] = rnn_simple.params[i][1];
   }
 }
 
