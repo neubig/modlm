@@ -12,6 +12,7 @@ you are on Ubuntu/Debian linux, you can install them below:
 
 You must install Eigen and cnn separately. Follow the directions on the
 [cnn page](http://github.com/clab/cnn), which also explain about installing Eigen.
+Note that you should use the "v2" branch of cnn.
 
 Once these two packages are installed, run the following commands, specifying the
 correct paths for cnn and Eigen.
