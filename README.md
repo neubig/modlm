@@ -22,3 +22,28 @@ correct paths for cnn and Eigen.
 
 In the instructions below, you can see how to use modlm to train and use language
 models.
+
+Citation
+--------
+
+More information about the method used in the toolkit can be found in the following paper:
+
+[Generalizing and Hybridizing Count-based and Neural Language Models](http://arxiv.org/abs/1606.00499)
+Graham Neubig and Chris Dyer.
+ArXiv Preprint.
+
+Training
+--------
+
+You can find an example of how to run the toolkit in the `example` directory, which will reproduce our
+main experiments from the paper.
+Our main experiments can be run by the following process:
+
+* Enter the directory with `cd example`.
+* Decompress the training data with `bunzip2 data-ptb/*.bz2`
+* Run `preproc.sh` to train count-based language models
+* Run `process.sh` to train neurally interpolated n-gram, standard LSTM language model, and neural/ngram hybrid models
+
+Log files and models will be written out to the `result-ptb`
+
+Further instructions about how to use the program are currently in preparation.
