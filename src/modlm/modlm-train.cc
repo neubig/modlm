@@ -741,7 +741,7 @@ void ModlmTrain::sanity_check_aggregate(const SequenceIndexer<Sentence> & my_cou
         int dense_offset = 0, sparse_offset = 0;
         for(auto dist : dists_)
           dist->calc_word_dists(my_ngram, uniform_prob, unk_prob, trg_dense, dense_offset, trg_sparse, sparse_offset);
-        // cerr << "   " << dict_->Convert(wid) << ":";
+        // cerr << "   " << dict_->convert(wid) << ":";
         for(size_t did = 0; did < num_dense_dist_; did++) {
           dist_trg_sum[did] += trg_dense[did] / (wid == 0 ? unk_prob : 1.f);
           // cerr << ' ' << dist_trg.first[did];
@@ -845,7 +845,6 @@ int ModlmTrain::main(int argc, char** argv) {
   print_interp_ = vm["print_interp"].as<int>();
   node_dropout_prob_ = vm["node_dropout_prob"].as<float>();
   weight_decay_ = vm["weight_decay"].as<float>();
-  cnn::global_weight_decay.SetLambda(weight_decay_);
   batch_regularizer_ = vm["batch_regularizer"].as<float>();
   if(batch_regularizer_ != 0.f) THROW_ERROR("Batch regularization not implemented yet.");
   string operation = vm["operation"].as<string>(); 
@@ -896,8 +895,8 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Read in the vocabulary if necessary
   dict_.reset(new cnn::Dict);
-  dict_->Convert("<unk>");
-  dict_->Convert("<s>");
+  dict_->convert("<unk>");
+  dict_->convert("<s>");
   string vocab_file = vm["vocab_file"].as<string>();
   if(vocab_file == "")
     THROW_ERROR("Must specify a vocabulary file");
@@ -905,9 +904,9 @@ int ModlmTrain::main(int argc, char** argv) {
   if(!(getline(vocab_in, line) && line == "<unk>" && getline(vocab_in, line) && line == "<s>"))
     THROW_ERROR("First two lines of a vocabulary file must be <unk> and <s>: " << vocab_file);
   while(getline(vocab_in, line))
-    dict_->Convert(line);
-  dict_->Freeze();
-  dict_->SetUnk("<unk>");
+    dict_->convert(line);
+  dict_->freeze();
+  dict_->set_unk("<unk>");
 
   // Read in the model locations. For each type of model, there must be either one model, or one
   // testing model, and then a model for each of the training folds
@@ -957,6 +956,7 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Initialize
   mod_.reset(new cnn::Model);
+  mod_->set_weight_decay_lambda(weight_decay_);
   trainer_ = get_trainer(trainer_id_, learning_rate_, *mod_);
   trainer_->clipping_enabled = clipping_enabled_;
 

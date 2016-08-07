@@ -46,16 +46,16 @@ int DistTrain::main(int argc, char** argv) {
   // Read in the vocabulary if necessary
   string line;
   DictPtr dict(new cnn::Dict);
-  dict->Convert("<unk>");
-  dict->Convert("<s>");
+  dict->convert("<unk>");
+  dict->convert("<s>");
   if(vm_["vocab_file"].as<string>() != "") {
     ifstream vocab_file(vm_["vocab_file"].as<string>());
     if(!(getline(vocab_file, line) && line == "<unk>" && getline(vocab_file, line) && line == "<s>"))
     THROW_ERROR("First two lines of a vocabulary file must be <unk> and <s>");
     while(getline(vocab_file, line))
-    dict->Convert(line);
-    dict->Freeze();
-    dict->SetUnk("<unk>");
+    dict->convert(line);
+    dict->freeze();
+    dict->set_unk("<unk>");
   }
 
   // Create the model
