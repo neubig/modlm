@@ -1,6 +1,6 @@
 
 #include <modlm/interp-probs.h>
-#include <cnn/init.h>
+#include <dynet/init.h>
 
 using namespace modlm;
 

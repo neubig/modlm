@@ -1,6 +1,6 @@
 #include <iostream>
 #include <sstream>
-#include <cnn/dict.h>
+#include <dynet/dict.h>
 #include <modlm/dict-utils.h>
 
 using namespace std;

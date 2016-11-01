@@ -5,7 +5,7 @@
 #include <boost/program_options.hpp>
 #include <boost/range/irange.hpp>
 #include <boost/algorithm/string.hpp>
-#include <cnn/dict.h>
+#include <dynet/dict.h>
 #include <modlm/interp-probs.h>
 #include <modlm/macros.h>
 #include <modlm/timer.h>

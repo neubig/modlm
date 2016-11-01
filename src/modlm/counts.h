@@ -6,11 +6,11 @@
 #include <modlm/hashes.h>
 #include <modlm/training-data.h>
 
-namespace cnn { class Dict; }
+namespace dynet { class Dict; }
 
 namespace modlm {
 
-typedef std::shared_ptr<cnn::Dict> DictPtr;
+typedef std::shared_ptr<dynet::Dict> DictPtr;
 
 class ContextCounts {
 public:

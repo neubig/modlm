@@ -8,14 +8,14 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/archive/text_oarchive.hpp>
-#include <cnn/expr.h>
-#include <cnn/cnn.h>
-#include <cnn/dict.h>
-#include <cnn/training.h>
-#include <cnn/rnn.h>
-#include <cnn/lstm.h>
-#include <cnn/grad-check.h>
-#include <cnn/weight-decay.h>
+#include <dynet/expr.h>
+#include <dynet/dynet.h>
+#include <dynet/dict.h>
+#include <dynet/training.h>
+#include <dynet/rnn.h>
+#include <dynet/lstm.h>
+#include <dynet/grad-check.h>
+#include <dynet/weight-decay.h>
 #include <modlm/modlm-train.h>
 #include <modlm/macros.h>
 #include <modlm/timer.h>
@@ -30,7 +30,7 @@
 #include <modlm/input-file-stream.h>
 
 using namespace std;
-using namespace cnn::expr;
+using namespace dynet::expr;
 namespace po = boost::program_options;
 
 namespace modlm {
@@ -81,20 +81,20 @@ inline std::vector<std::string> split_wildcarded(const std::string & str, const 
   return ret;
 }
 
-ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float learning_rate, cnn::Model & model) {
+ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float learning_rate, dynet::Model & model) {
     TrainerPtr trainer;
     if(trainer_id == "sgd") {
-        trainer.reset(new cnn::SimpleSGDTrainer(&model, learning_rate));
+        trainer.reset(new dynet::SimpleSGDTrainer(&model, learning_rate));
     } else if(trainer_id == "momentum") {
-        trainer.reset(new cnn::MomentumSGDTrainer(&model, learning_rate));
+        trainer.reset(new dynet::MomentumSGDTrainer(&model, learning_rate));
     } else if(trainer_id == "adagrad") {
-        trainer.reset(new cnn::AdagradTrainer(&model, learning_rate));
+        trainer.reset(new dynet::AdagradTrainer(&model, learning_rate));
     } else if(trainer_id == "adadelta") {
-        trainer.reset(new cnn::AdadeltaTrainer(&model, learning_rate));
+        trainer.reset(new dynet::AdadeltaTrainer(&model, learning_rate));
     } else if(trainer_id == "adam") {
-        trainer.reset(new cnn::AdamTrainer(&model, learning_rate));
+        trainer.reset(new dynet::AdamTrainer(&model, learning_rate));
     } else if(trainer_id == "rms") {
-        trainer.reset(new cnn::RmsPropTrainer(&model, learning_rate));
+        trainer.reset(new dynet::RmsPropTrainer(&model, learning_rate));
     } else {
         THROW_ERROR("Illegal trainer variety: " << trainer_id);
     }
@@ -109,7 +109,7 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
                                     const vector<float> & out_dists,
                                     const vector<float> & out_cnts,
                                     bool dropout,
-                                    cnn::ComputationGraph & cg) {
+                                    dynet::ComputationGraph & cg) {
   // Load the targets
   int num_dist = num_sparse_dist_ + num_dense_dist_;
   int num_words = out_cnts.size() / mb_num_sent;
@@ -131,7 +131,7 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
   } else {
 
     // Add the context for this instance
-    Expression h = input(cg, cnn::Dim({(unsigned int)(ctxt_feats.size()/mb_num_sent)}, mb_num_sent), ctxt_feats);
+    Expression h = input(cg, dynet::Dim({(unsigned int)(ctxt_feats.size()/mb_num_sent)}, mb_num_sent), ctxt_feats);
 
     // Do the NN computation
     if(word_hist_ != 0) {
@@ -169,17 +169,17 @@ Expression ModlmTrain::add_to_graph(size_t mb_num_sent,
       print_interp_vec_[i] += my_interp[i];
   }
 
-  Expression probs = input(cg, cnn::Dim({(unsigned int)num_dist, (unsigned int)num_words}, mb_num_sent), out_dists);
+  Expression probs = input(cg, dynet::Dim({(unsigned int)num_dist, (unsigned int)num_words}, mb_num_sent), out_dists);
   if(print_interp_ > 1) {
     if(mb_num_sent > 1) THROW_ERROR("Minibatched probability printing not supported yet");
-    cerr << "word_interp: " << print_vec(cnn::as_vector(interp.value())) << endl;
+    cerr << "word_interp: " << print_vec(dynet::as_vector(interp.value())) << endl;
   }
-  // cerr << "interp: " << print_vec(cnn::as_vector(interp.value())) << endl;
-  // cerr << "probs: " << print_vec(cnn::as_vector(probs.value())) << endl;
+  // cerr << "interp: " << print_vec(dynet::as_vector(interp.value())) << endl;
+  // cerr << "probs: " << print_vec(dynet::as_vector(probs.value())) << endl;
   Expression nll = -log(transpose(probs) * interp);  
-  // cerr << "nll: " << print_vec(cnn::as_vector(nll.value())) << endl;
+  // cerr << "nll: " << print_vec(dynet::as_vector(nll.value())) << endl;
   if(num_words > 1 || *max_element(out_cnts.begin(), out_cnts.end()) > 1) {
-    Expression counts = input(cg, cnn::Dim({(unsigned int)num_words}, mb_num_sent), out_cnts);
+    Expression counts = input(cg, dynet::Dim({(unsigned int)num_words}, mb_num_sent), out_cnts);
     nll = transpose(counts) * nll;
   }
   if(mb_num_sent > 1) nll = sum_batches(nll);
@@ -193,7 +193,7 @@ float ModlmTrain::calc_instance<IndexedAggregateData,IndexedAggregateInstance>(c
   // int num_dist = num_dense_dist_ + num_sparse_dist_;
   // float loss = 0.f;
   // for(size_t i = 0; i < data.second.size(); i += max_minibatch_) {
-  //   cnn::ComputationGraph cg;
+  //   dynet::ComputationGraph cg;
   //   V_expr_ = parameter(cg, V_);
   //   a_expr_ = parameter(cg, a_);
   //   if(builder_.get() != NULL) {
@@ -216,7 +216,7 @@ float ModlmTrain::calc_instance<IndexedAggregateData,IndexedAggregateInstance>(c
   //     words.first += kv.second;
   //   }
   //   add_to_graph(ctxt_inverter_[data.first.first], data.first.second, wdists_, wcnts, update, cg);
-  //   loss += cnn::as_scalar(cg.forward());
+  //   loss += dynet::as_scalar(cg.forward());
   //   if(loss != loss) THROW_ERROR("Loss is not a number");
   //   if(update) {
   //     cg.backward();
@@ -230,7 +230,7 @@ float ModlmTrain::calc_instance<IndexedAggregateData,IndexedAggregateInstance>(c
 template <>
 float ModlmTrain::calc_instance<IndexedSentenceData,IndexedSentenceInstance>(const IndexedSentenceData & data, int minibatch_id, bool update, std::pair<int,int> epoch, pair<int,int> & words) {
   // Initialize the computation graph
-  cnn::ComputationGraph cg;
+  dynet::ComputationGraph cg;
   V_expr_ = parameter(cg, V_);
   a_expr_ = parameter(cg, a_);
   if(builder_.get() != NULL) {
@@ -278,11 +278,11 @@ float ModlmTrain::calc_instance<IndexedSentenceData,IndexedSentenceInstance>(con
     loss_exps.push_back(add_to_graph(mb_num_sent, wctxt, ctxt_ngrams, wdists, wcnts, update, cg));
   }
   // Sum the losses and perform computation
-  sum(loss_exps);
-  float loss = cnn::as_scalar(cg.forward());
+  Expression loss_sum = sum(loss_exps);
+  float loss = dynet::as_scalar(cg.forward(loss_sum));
   if(loss != loss) THROW_ERROR("Loss is not a number");
   if(update) {
-    cg.backward();
+    cg.backward(loss_sum);
     if(online_epochs_ == -1 || epoch.first <= online_epochs_)
       trainer_->update();
   }
@@ -294,12 +294,12 @@ float ModlmTrain::calc_instance<IndexedSentenceData,IndexedSentenceInstance>(con
 
 int ModlmTrain::calc_dropout_set() {
   uniform_real_distribution<float> float_distribution(0.0, 1.0);  
-  if(float_distribution(*cnn::rndeng) >= model_dropout_prob_) {
+  if(float_distribution(*dynet::rndeng) >= model_dropout_prob_) {
     return -1;
   } else {
     assert(dropout_spans_.size() > 0);
     uniform_int_distribution<int> int_distribution(0, (int)dropout_spans_.size()-1);  
-    return int_distribution(*cnn::rndeng);
+    return int_distribution(*dynet::rndeng);
   }
 }
 
@@ -308,9 +308,9 @@ float ModlmTrain::calc_dataset(const Data & data, bool update, std::pair<int,int
 
   // Set the dropout for the LSTM
   if(hidden_spec_.type == "lstm")
-    ((cnn::LSTMBuilder*)builder_.get())->set_dropout(update ? node_dropout_prob_ : 0.f);
+    ((dynet::LSTMBuilder*)builder_.get())->set_dropout(update ? node_dropout_prob_ : 0.f);
   else if(hidden_spec_.type == "ff")
-    ((cnn::FFBuilder*)builder_.get())->set_dropout(update ? node_dropout_prob_ : 0.f);
+    ((dynet::FFBuilder*)builder_.get())->set_dropout(update ? node_dropout_prob_ : 0.f);
   else if(node_dropout_prob_)
     THROW_ERROR("Non-zero dropout prob for layer type '" << hidden_spec_.type << "' that doesn't support it");
 
@@ -572,7 +572,7 @@ void ModlmTrain::perform_training() {
   // Train a neural network to predict the interpolation coefficients
   float last_valid = 1e99, best_valid = 1e99;
   for(int epoch = 1; epoch <= epochs_; epoch++) { 
-    std::shuffle(train_data.curr_order.begin(), train_data.curr_order.end(), *cnn::rndeng);
+    std::shuffle(train_data.curr_order.begin(), train_data.curr_order.end(), *dynet::rndeng);
     bool is_online = online_epochs_==-1||epoch<=online_epochs_;
     for(size_t range = 1; range <= evaluate_frequency_; range++) {
       pair<int,int> epoch_pair(epoch, evaluate_frequency_ == 1 ? 0 : range);
@@ -588,8 +588,8 @@ void ModlmTrain::perform_training() {
       // Do batch update and regularization if necessary
       if(online_epochs_ != -1 && epoch > online_epochs_) {
         // if(batch_regularizer_ != 0.0) {
-        //   vector<cnn::expr::Expression> losses;
-        //   cnn::ComputationGraph cg;
+        //   vector<dynet::expr::Expression> losses;
+        //   dynet::ComputationGraph cg;
         //   for(auto & param : mod_->parameters_list()) {
         //     Expression my_param = parameter(cg, param);
         //     losses.push_back(squared_norm(my_param));
@@ -599,7 +599,7 @@ void ModlmTrain::perform_training() {
         //     std::iota(ids.begin(), ids.end(), 0);
         //     losses.push_back(sum_batches(squared_norm(lookup(cg, param, ids))));
         //   }
-        //   float train_norm = cnn::as_scalar((sum(losses) * batch_regularizer_).value());
+        //   float train_norm = dynet::as_scalar((sum(losses) * batch_regularizer_).value());
         //   float train_obj = train_loss+train_norm, log2 = train_data.all_words*log(2);
         //   cg.backward();
         //   cerr << "trn  epoch " << epoch << ": regppl=" << exp(train_obj/train_data.all_words) << " loss=" << train_loss/log2 << ", l2=" << train_norm/log2 << ", obj=" << train_obj/log2 << endl;
@@ -673,7 +673,7 @@ void ModlmTrain::calc_prob() {
     float total_loss = 0;
     pair<int,int> total_words(0,0);
     while(getline(in, line)) {
-      cnn::ComputationGraph cg;
+      dynet::ComputationGraph cg;
       V_expr_ = parameter(cg, V_);
       a_expr_ = parameter(cg, a_);
       if(builder_.get() != NULL) {
@@ -766,8 +766,8 @@ int ModlmTrain::main(int argc, char** argv) {
       ("help", "Produce help message")
       ("clipping_enabled", po::value<bool>()->default_value(true), "Whether to enable clipping or not")
       ("evaluate_frequency", po::value<int>()->default_value(1), "How many times to evaluate for each training epoch")
-      ("cnn_mem", po::value<int>()->default_value(512), "Memory used by cnn in megabytes")
-      ("cnn_seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
+      ("dynet_mem", po::value<int>()->default_value(512), "Memory used by dynet in megabytes")
+      ("dynet_seed", po::value<int>()->default_value(0), "Random seed (default 0 -> changes every time)")
       ("dist_models", po::value<string>()->default_value(""), "Files containing the distribution models")
       ("dropout_models", po::value<string>()->default_value(""), "Which models should be dropped out (zero-indexed ints in comma-delimited groups separated by spaces)")
       ("model_dropout_prob", po::value<float>()->default_value(0.0), "Starting model dropout probability")
@@ -894,7 +894,7 @@ int ModlmTrain::main(int argc, char** argv) {
   cout << "Reading vocabulary... (s=" << time_.Elapsed() << ")" << endl;
 
   // Read in the vocabulary if necessary
-  dict_.reset(new cnn::Dict);
+  dict_.reset(new dynet::Dict);
   dict_->convert("<unk>");
   dict_->convert("<s>");
   string vocab_file = vm["vocab_file"].as<string>();
@@ -955,7 +955,7 @@ int ModlmTrain::main(int argc, char** argv) {
   cout << "Creating model (s=" << time_.Elapsed() << ")" << endl;
 
   // Initialize
-  mod_.reset(new cnn::Model);
+  mod_.reset(new dynet::Model);
   mod_->set_weight_decay_lambda(weight_decay_);
   trainer_ = get_trainer(trainer_id_, learning_rate_, *mod_);
   trainer_->clipping_enabled = clipping_enabled_;

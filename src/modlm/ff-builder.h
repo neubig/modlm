@@ -1,13 +1,13 @@
 #pragma once
 
-#include <cnn/rnn.h>
-#include <cnn/cnn.h>
-#include <cnn/rnn-state-machine.h>
-#include <cnn/expr.h>
+#include <dynet/rnn.h>
+#include <dynet/dynet.h>
+#include <dynet/rnn-state-machine.h>
+#include <dynet/expr.h>
 
-using namespace cnn::expr;
+using namespace dynet::expr;
 
-namespace cnn {
+namespace dynet {
 
 class Model;
 
@@ -19,6 +19,7 @@ struct FFBuilder : public RNNBuilder {
                      Model* model);
 
  protected:
+  virtual Expression set_h_impl(int prev, const std::vector<Expression>& h_new) override;
   void new_graph_impl(ComputationGraph& cg) override;
   void start_new_sequence_impl(const std::vector<Expression>& h_0) override;
   Expression add_input_impl(int prev, const Expression& x) override;
@@ -54,5 +55,5 @@ struct FFBuilder : public RNNBuilder {
   unsigned layers;
 };
 
-} // namespace cnn
+} // namespace dynet
 

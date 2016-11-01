@@ -1,16 +1,16 @@
 #include <modlm/ff-builder.h>
-#include <cnn/rnn.h>
-#include <cnn/nodes.h>
-#include <cnn/expr.h>
+#include <dynet/rnn.h>
+#include <dynet/nodes.h>
+#include <dynet/expr.h>
 #include <string>
 #include <cassert>
 #include <vector>
 #include <iostream>
 
 using namespace std;
-using namespace cnn::expr;
+using namespace dynet::expr;
 
-namespace cnn {
+namespace dynet {
 
 enum { X2H=0, HB };
 
@@ -39,6 +39,11 @@ void FFBuilder::new_graph_impl(ComputationGraph& cg) {
     param_vars.push_back(vars);
   }
 }
+
+Expression FFBuilder::set_h_impl(int prev, const std::vector<Expression>& h_new) {
+  throw std::runtime_error("set_h_impl not implemented for FFBuilder");
+} 
+
 
 void FFBuilder::start_new_sequence_impl(const vector<Expression>& h_0) {
   assert(h_0.size() == 0);
@@ -78,4 +83,4 @@ void FFBuilder::copy(const RNNBuilder & rnn) {
   }
 }
 
-} // namespace cnn
+} // namespace dynet

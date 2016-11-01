@@ -1,6 +1,6 @@
 
 #include <modlm/dist-train.h>
-#include <cnn/init.h>
+#include <dynet/init.h>
 
 using namespace modlm;
 

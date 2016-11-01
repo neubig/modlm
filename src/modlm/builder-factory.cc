@@ -1,10 +1,10 @@
 
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
-#include <cnn/model.h>
-#include <cnn/rnn.h>
-#include <cnn/lstm.h>
-#include <cnn/gru.h>
+#include <dynet/model.h>
+#include <dynet/rnn.h>
+#include <dynet/lstm.h>
+#include <dynet/gru.h>
 #include <modlm/builder-factory.h>
 #include <modlm/macros.h>
 #include <modlm/ff-builder.h>
@@ -22,17 +22,17 @@ BuilderSpec::BuilderSpec(const std::string & spec) {
     layers = boost::lexical_cast<int>(strs[2]); 
 }
 
-BuilderPtr BuilderFactory::CreateBuilder(const BuilderSpec & spec, int input_dim, cnn::Model & model) {
+BuilderPtr BuilderFactory::CreateBuilder(const BuilderSpec & spec, int input_dim, dynet::Model & model) {
     // cerr << "BuilderFactor::CreateBuilder(" << spec << ", " << input_dim << ", " << (long)&model << ")" << endl;
     if(spec.type == "ff") {
-        return BuilderPtr(new cnn::FFBuilder(spec.layers, input_dim, spec.nodes, &model));
+        return BuilderPtr(new dynet::FFBuilder(spec.layers, input_dim, spec.nodes, &model));
     } else if(spec.type == "rnn") {
-        return BuilderPtr(new cnn::SimpleRNNBuilder(spec.layers, input_dim, spec.nodes, &model));
+        return BuilderPtr(new dynet::SimpleRNNBuilder(spec.layers, input_dim, spec.nodes, &model));
     } else if(spec.type == "lstm") {
-        return BuilderPtr(new cnn::LSTMBuilder(spec.layers, input_dim, spec.nodes, &model));
+        return BuilderPtr(new dynet::LSTMBuilder(spec.layers, input_dim, spec.nodes, &model));
     } else if(spec.type == "gru") {
         THROW_ERROR("GRU spec.nodes are not supported yet.");
-        // return BuilderPtr(new cnn::GRUBuilder(spec.layers, input_dim, spec.nodes, &model));
+        // return BuilderPtr(new dynet::GRUBuilder(spec.layers, input_dim, spec.nodes, &model));
     } else {
         THROW_ERROR("Unknown layer type " << spec.type);
     }

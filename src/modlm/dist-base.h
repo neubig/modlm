@@ -5,7 +5,7 @@
 #include <memory>
 #include <modlm/sentence.h>
 
-namespace cnn {
+namespace dynet {
   class Dict;
 }
 
@@ -16,7 +16,7 @@ namespace modlm {
 // * second is a sparse vector of distributions
 // typedef std::pair<std::vector<float>, std::vector<std::pair<int, float> > > DistTarget;
 
-typedef std::shared_ptr<cnn::Dict> DictPtr;
+typedef std::shared_ptr<dynet::Dict> DictPtr;
 
 // A base class implementing the functions necessary for calculation
 class DistBase {

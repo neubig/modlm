@@ -5,7 +5,7 @@
 #include <boost/program_options.hpp>
 #include <boost/range/irange.hpp>
 #include <boost/algorithm/string.hpp>
-#include <cnn/dict.h>
+#include <dynet/dict.h>
 #include <modlm/dist-train.h>
 #include <modlm/macros.h>
 #include <modlm/timer.h>
@@ -45,7 +45,7 @@ int DistTrain::main(int argc, char** argv) {
 
   // Read in the vocabulary if necessary
   string line;
-  DictPtr dict(new cnn::Dict);
+  DictPtr dict(new dynet::Dict);
   dict->convert("<unk>");
   dict->convert("<s>");
   if(vm_["vocab_file"].as<string>() != "") {

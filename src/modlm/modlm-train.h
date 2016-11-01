@@ -3,8 +3,8 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
-#include <cnn/expr.h>
-#include <cnn/model.h>
+#include <dynet/expr.h>
+#include <dynet/model.h>
 #include <modlm/sentence.h>
 #include <modlm/timer.h>
 #include <modlm/training-data.h>
@@ -12,7 +12,7 @@
 #include <modlm/sequence-indexer.h>
 #include <modlm/builder-factory.h>
 
-namespace cnn {
+namespace dynet {
   class Model;
   class Dict;
   struct Trainer;
@@ -23,15 +23,15 @@ namespace cnn {
 namespace modlm {
 
 class Model;
-typedef std::shared_ptr<cnn::Model> ModelPtr;
+typedef std::shared_ptr<dynet::Model> ModelPtr;
 class Heuristic;
 typedef std::shared_ptr<Heuristic> HeuristicPtr;
 class Whitener;
 typedef std::shared_ptr<Whitener> WhitenerPtr;
 class DistBase;
 typedef std::shared_ptr<DistBase> DistPtr;
-typedef std::shared_ptr<cnn::Dict> DictPtr;
-typedef std::shared_ptr<cnn::RNNBuilder> BuilderPtr;
+typedef std::shared_ptr<dynet::Dict> DictPtr;
+typedef std::shared_ptr<dynet::RNNBuilder> BuilderPtr;
 
 // A data structure for aggregate training instances
 typedef std::pair<int, std::vector<std::pair<int,float> > > IndexedDistTarget;
@@ -39,12 +39,12 @@ typedef std::unordered_map<IndexedAggregateContext, std::unordered_map<IndexedDi
 
 class ModlmTrain {
 private:
-  typedef std::shared_ptr<cnn::Trainer> TrainerPtr;
+  typedef std::shared_ptr<dynet::Trainer> TrainerPtr;
 
 public:
   ModlmTrain() : num_ctxt_(0), num_dense_dist_(0), num_sparse_dist_(0), word_hist_(0), word_rep_(50), use_context_(true), dist_indexer_(-1), ctxt_indexer_(-1) { }
 
-  TrainerPtr get_trainer(const std::string & trainer_id, float learning_rate, cnn::Model & model);
+  TrainerPtr get_trainer(const std::string & trainer_id, float learning_rate, dynet::Model & model);
 
   int main(int argc, char** argv);
   
@@ -54,7 +54,7 @@ protected:
 
   // *** Create the graph
 
-  cnn::expr::Expression add_to_graph(size_t mb_num_sent, const std::vector<float> & wctxt, const std::vector<Sentence> & ctxt_ngrams, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, cnn::ComputationGraph & cg);
+  dynet::expr::Expression add_to_graph(size_t mb_num_sent, const std::vector<float> & wctxt, const std::vector<Sentence> & ctxt_ngrams, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, dynet::ComputationGraph & cg);
 
   template <class Data, class Instance>
   float calc_instance(const Data & data, int minibatch, bool update, std::pair<int,int> epoch, std::pair<int,int> & words);
@@ -103,10 +103,10 @@ protected:
   TrainerPtr trainer_;
   BuilderSpec hidden_spec_;
 
-  cnn::LookupParameter reps_;
+  dynet::LookupParameter reps_;
   BuilderPtr builder_;
-  cnn::Parameter V_; cnn::expr::Expression V_expr_;
-  cnn::Parameter a_; cnn::expr::Expression a_expr_;
+  dynet::Parameter V_; dynet::expr::Expression V_expr_;
+  dynet::Parameter a_; dynet::expr::Expression a_expr_;
 
   float log_unk_prob_;
   int max_ctxt_, num_ctxt_, num_dense_dist_, num_sparse_dist_;
