@@ -84,17 +84,17 @@ inline std::vector<std::string> split_wildcarded(const std::string & str, const 
 ModlmTrain::TrainerPtr ModlmTrain::get_trainer(const string & trainer_id, float learning_rate, dynet::Model & model) {
     TrainerPtr trainer;
     if(trainer_id == "sgd") {
-        trainer.reset(new dynet::SimpleSGDTrainer(&model, learning_rate));
+        trainer.reset(new dynet::SimpleSGDTrainer(model, learning_rate));
     } else if(trainer_id == "momentum") {
-        trainer.reset(new dynet::MomentumSGDTrainer(&model, learning_rate));
+        trainer.reset(new dynet::MomentumSGDTrainer(model, learning_rate));
     } else if(trainer_id == "adagrad") {
-        trainer.reset(new dynet::AdagradTrainer(&model, learning_rate));
+        trainer.reset(new dynet::AdagradTrainer(model, learning_rate));
     } else if(trainer_id == "adadelta") {
-        trainer.reset(new dynet::AdadeltaTrainer(&model, learning_rate));
+        trainer.reset(new dynet::AdadeltaTrainer(model, learning_rate));
     } else if(trainer_id == "adam") {
-        trainer.reset(new dynet::AdamTrainer(&model, learning_rate));
+        trainer.reset(new dynet::AdamTrainer(model, learning_rate));
     } else if(trainer_id == "rms") {
-        trainer.reset(new dynet::RmsPropTrainer(&model, learning_rate));
+        trainer.reset(new dynet::RMSPropTrainer(model, learning_rate));
     } else {
         THROW_ERROR("Illegal trainer variety: " << trainer_id);
     }

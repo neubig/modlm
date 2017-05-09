@@ -16,10 +16,11 @@ struct FFBuilder : public RNNBuilder {
   explicit FFBuilder(unsigned layers,
                      unsigned input_dim,
                      unsigned hidden_dim,
-                     Model* model);
+                     Model& model);
 
  protected:
   virtual Expression set_h_impl(int prev, const std::vector<Expression>& h_new) override;
+  virtual Expression set_s_impl(int prev, const std::vector<Expression>& h_new) override;
   void new_graph_impl(ComputationGraph& cg) override;
   void start_new_sequence_impl(const std::vector<Expression>& h_0) override;
   Expression add_input_impl(int prev, const Expression& x) override;

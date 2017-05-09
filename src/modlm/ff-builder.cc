@@ -17,11 +17,11 @@ enum { X2H=0, HB };
 FFBuilder::FFBuilder(unsigned layers,
                        unsigned input_dim,
                        unsigned hidden_dim,
-                       Model* model) : layers(layers), dropout_rate(0.f) {
+                       Model& model) : layers(layers), dropout_rate(0.f) {
   unsigned layer_input_dim = input_dim;
   for (unsigned i = 0; i < layers; ++i) {
-    Parameter p_x2h = model->add_parameters({hidden_dim, layer_input_dim});
-    Parameter p_hb = model->add_parameters({hidden_dim});
+    Parameter p_x2h = model.add_parameters({hidden_dim, layer_input_dim});
+    Parameter p_hb = model.add_parameters({hidden_dim});
     params.push_back({p_x2h, p_hb});
     layer_input_dim = hidden_dim;
   }
@@ -42,6 +42,10 @@ void FFBuilder::new_graph_impl(ComputationGraph& cg) {
 
 Expression FFBuilder::set_h_impl(int prev, const std::vector<Expression>& h_new) {
   throw std::runtime_error("set_h_impl not implemented for FFBuilder");
+} 
+
+Expression FFBuilder::set_s_impl(int prev, const std::vector<Expression>& h_new) {
+  throw std::runtime_error("set_s_impl not implemented for FFBuilder");
 } 
 
 
