@@ -5,7 +5,7 @@ set -e
 MEM=0512
 MINIBATCH=0512
 SEED=100
-MDIR=`pwd`/../modlm
+MDIR=`pwd`/..
 DEVEPOCHS=1
 
 DTYPE=ptb
