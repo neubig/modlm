@@ -54,7 +54,7 @@ protected:
 
   // *** Create the graph
 
-  dynet::expr::Expression add_to_graph(size_t mb_num_sent, const std::vector<float> & wctxt, const std::vector<Sentence> & ctxt_ngrams, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, dynet::ComputationGraph & cg);
+  dynet::Expression add_to_graph(size_t mb_num_sent, const std::vector<float> & wctxt, const std::vector<Sentence> & ctxt_ngrams, const std::vector<float> & wdists, const std::vector<float> & wcnts, bool dropout, dynet::ComputationGraph & cg);
 
   template <class Data, class Instance>
   float calc_instance(const Data & data, int minibatch, bool update, std::pair<int,int> epoch, std::pair<int,int> & words);
@@ -105,8 +105,8 @@ protected:
 
   dynet::LookupParameter reps_;
   BuilderPtr builder_;
-  dynet::Parameter V_; dynet::expr::Expression V_expr_;
-  dynet::Parameter a_; dynet::expr::Expression a_expr_;
+  dynet::Parameter V_; dynet::Expression V_expr_;
+  dynet::Parameter a_; dynet::Expression a_expr_;
 
   float log_unk_prob_;
   int max_ctxt_, num_ctxt_, num_dense_dist_, num_sparse_dist_;

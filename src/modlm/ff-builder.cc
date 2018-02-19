@@ -8,7 +8,6 @@
 #include <iostream>
 
 using namespace std;
-using namespace dynet::expr;
 
 namespace dynet {
 
@@ -18,10 +17,11 @@ FFBuilder::FFBuilder(unsigned layers,
                        unsigned input_dim,
                        unsigned hidden_dim,
                        Model& model) : layers(layers), dropout_rate(0.f) {
+  local_model = model.add_subcollection("ff-builder");
   unsigned layer_input_dim = input_dim;
   for (unsigned i = 0; i < layers; ++i) {
-    Parameter p_x2h = model.add_parameters({hidden_dim, layer_input_dim});
-    Parameter p_hb = model.add_parameters({hidden_dim});
+    Parameter p_x2h = local_model.add_parameters({hidden_dim, layer_input_dim});
+    Parameter p_hb = local_model.add_parameters({hidden_dim}); //, ParameterInitConst(0.f));
     params.push_back({p_x2h, p_hb});
     layer_input_dim = hidden_dim;
   }
