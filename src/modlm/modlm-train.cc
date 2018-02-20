@@ -6,11 +6,10 @@
 #include <boost/program_options.hpp>
 #include <boost/range/irange.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/archive/text_iarchive.hpp>
-#include <boost/archive/text_oarchive.hpp>
 #include <dynet/expr.h>
 #include <dynet/dynet.h>
 #include <dynet/dict.h>
+#include "dynet/io.h"
 #include <dynet/training.h>
 #include <dynet/rnn.h>
 #include <dynet/lstm.h>
@@ -30,7 +29,7 @@
 #include <modlm/input-file-stream.h>
 
 using namespace std;
-using namespace dynet::expr;
+using namespace dynet;
 namespace po = boost::program_options;
 
 namespace modlm {
@@ -616,10 +615,8 @@ void ModlmTrain::perform_training() {
         last_valid = valid_loss;
         // Open the output model
         if(best_valid > valid_loss && model_out_file_ != "") {
-          ofstream out(model_out_file_.c_str());
-          if(!out) THROW_ERROR("Could not open output file: " << model_out_file_);
-          boost::archive::text_oarchive oa(out);
-          oa << *mod_;
+          dynet::TextFileSaver saver(model_out_file_.c_str());
+          saver.save(*mod_);
           best_valid = valid_loss;
         }
       }
@@ -982,10 +979,8 @@ int ModlmTrain::main(int argc, char** argv) {
 
   // Open the input model
   if(model_in_file_ != "") {
-    ifstream in(model_in_file_.c_str());
-    if(!in) THROW_ERROR("Could not open input file: " << model_in_file_);
-    boost::archive::text_iarchive ia(in);
-    ia >> *mod_;
+    dynet::TextFileLoader loader(model_in_file_.c_str());
+    loader.populate(*mod_);
   }
 
   // Actually perform training

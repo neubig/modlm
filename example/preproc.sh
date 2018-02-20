@@ -2,7 +2,7 @@
 set -e
 set -o pipefail
 
-MDIR=`pwd`/../modlm
+MDIR=`pwd`/..
 
 # SUF=wsj
 # LANG=txt

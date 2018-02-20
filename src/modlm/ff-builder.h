@@ -5,8 +5,6 @@
 #include <dynet/rnn-state-machine.h>
 #include <dynet/expr.h>
 
-using namespace dynet::expr;
-
 namespace dynet {
 
 class Model;
@@ -40,6 +38,8 @@ struct FFBuilder : public RNNBuilder {
 
   unsigned num_h0_components() const override { return 0; }
 
+  ParameterCollection & get_parameter_collection() { return local_model; }
+
  private:
   // first index is layer, then x2h hb
   std::vector<std::vector<Parameter> > params;
@@ -50,6 +50,8 @@ struct FFBuilder : public RNNBuilder {
   // initial value of h
   // defaults to zero matrix input
   std::vector<Expression> h0;
+
+  ParameterCollection local_model;
 
   float dropout_rate;
 
